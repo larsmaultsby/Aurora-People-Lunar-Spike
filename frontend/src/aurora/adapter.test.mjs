@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { auroraContext, conversationToMessages, interactionMessage, normalizeAuroraBaseUrl } from './adapter.js'
+import { auroraContext, conversationToMessages, interactionMessage, joinBasePath, normalizeAuroraBaseUrl } from './adapter.js'
 
 test('normalizes Aurora API base without changing the default proxy', () => {
   assert.equal(normalizeAuroraBaseUrl(''), '/aurora-api')
   assert.equal(normalizeAuroraBaseUrl('http://localhost:4173/'), 'http://localhost:4173')
+})
+
+test('joins public base paths for proxied Aurora API calls', () => {
+  assert.equal(joinBasePath('/', 'aurora-api'), '/aurora-api')
+  assert.equal(joinBasePath('/lunar/', 'aurora-api'), '/lunar/aurora-api')
 })
 
 test('compiles DO and SAY into Aurora scene-v1 text', () => {

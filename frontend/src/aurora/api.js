@@ -1,6 +1,8 @@
-import { normalizeAuroraBaseUrl } from './adapter'
+import { joinBasePath, normalizeAuroraBaseUrl } from './adapter'
 
-const BASE = normalizeAuroraBaseUrl(import.meta.env.VITE_AURORA_PEOPLE_BASE_URL)
+const BASE = normalizeAuroraBaseUrl(
+  import.meta.env.VITE_AURORA_PEOPLE_BASE_URL || joinBasePath(import.meta.env.BASE_URL, 'aurora-api')
+)
 
 async function request(path, options = {}) {
   const response = await fetch(`${BASE}${path}`, {

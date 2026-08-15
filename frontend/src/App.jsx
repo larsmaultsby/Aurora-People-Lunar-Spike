@@ -131,7 +131,7 @@ function Home() {
       {/* High-Quality Background Image from Nano Banana 2 (Imagen 3) */}
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-60 mix-blend-screen animate-pulse-slow" 
-        style={{ backgroundImage: "url('/lunar-bg.jpg')" }}
+        style={{ backgroundImage: `url('${import.meta.env.BASE_URL}lunar-bg.jpg')` }}
       ></div>
       
       {/* Dark Gradient Overlay */}
@@ -143,7 +143,7 @@ function Home() {
         <header className="mb-16 flex flex-col items-center text-center">
           <div className="mb-8">
             <img 
-              src="/lunar-logo.png"
+              src={`${import.meta.env.BASE_URL}lunar-logo.png`}
               alt="Lunar Logo"
               className="w-64 h-64 md:w-80 md:h-80 object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]"            />
           </div>
@@ -317,10 +317,10 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL === '/' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '')}>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/create" element={<ScenarioBuilder onCreated={() => window.location.href = '/'} />} />
+          <Route path="/create" element={<ScenarioBuilder onCreated={() => window.location.href = import.meta.env.BASE_URL} />} />
           <Route path="/play" element={<PlayGate />} />
           <Route path="/aurora" element={<AuroraGameCanvas />} />
         </Routes>

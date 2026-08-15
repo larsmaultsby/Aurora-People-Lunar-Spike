@@ -4,6 +4,12 @@ export function normalizeAuroraBaseUrl(value = '') {
   return trimmed.replace(/\/$/, '')
 }
 
+export function joinBasePath(basePath = '/', segment = '') {
+  const base = String(basePath || '/').replace(/^\/+|\/+$/g, '')
+  const suffix = String(segment || '').replace(/^\/+|\/+$/g, '')
+  return `/${[base, suffix].filter(Boolean).join('/')}`.replace(/\/{2,}/g, '/')
+}
+
 export function interactionMessage(type, text) {
   const mode = String(type || 'DO').toUpperCase()
   const body = String(text || '').trim()
