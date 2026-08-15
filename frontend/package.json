@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "test:aurora": "node --test src/aurora/adapter.test.mjs",
+    "build": "npm run test:aurora && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -3,15 +3,16 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
-
   return {
     plugins: [react()],
     server: {
       port: 5173,
       proxy: {
-        '/api': {
-          target: env.LUNAR_API_TARGET || 'http://localhost:8000',
+        '/api': { target: env.LUNAR_API_TARGET || 'http://localhost:8000', changeOrigin: true },
+        '/aurora-api': {
+          target: env.AURORA_PEOPLE_API_TARGET || 'http://localhost:4173',
           changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/aurora-api/, ''),
         },
       },
     },

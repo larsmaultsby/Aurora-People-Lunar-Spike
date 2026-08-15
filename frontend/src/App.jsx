@@ -4,6 +4,7 @@ import { useGameStore } from './store'
 import { fetchScenarios, exportScenario, fetchCampaigns, createCampaign, checkNeo4j, deleteCampaign, deleteScenario, fetchSetupState } from './api'
 import ErrorBoundary from './components/ErrorBoundary'
 import GameCanvas from './components/GameCanvas'
+import AuroraGameCanvas from './components/AuroraGameCanvas'
 import ScenarioBuilder from './components/ScenarioBuilder'
 import SetupWizard from './components/SetupWizard'
 
@@ -155,13 +156,21 @@ function Home() {
             Localized storytelling core. Multi-agent narrative orchestration with persistent world state and creativity-based resolution.
           </p>
           
-          <Link
-            to="/create"
-            className="group px-12 py-4 bg-white text-black hover:bg-gray-200 transition-all rounded-full font-bold flex items-center gap-4 uppercase text-sm tracking-[0.2em] shadow-[0_0_40px_rgba(255,255,255,0.15)]"
-          >
-            <span className="text-2xl group-hover:rotate-90 transition-transform duration-300">+</span> 
-            Construct Scenario
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link
+              to="/create"
+              className="group px-12 py-4 bg-white text-black hover:bg-gray-200 transition-all rounded-full font-bold flex items-center gap-4 uppercase text-sm tracking-[0.2em] shadow-[0_0_40px_rgba(255,255,255,0.15)]"
+            >
+              <span className="text-2xl group-hover:rotate-90 transition-transform duration-300">+</span> 
+              Construct Scenario
+            </Link>
+            <Link
+              to="/aurora"
+              className="px-8 py-4 border border-white/20 bg-black/40 hover:bg-white/10 text-white rounded-full font-bold uppercase text-xs tracking-[0.2em] transition-all"
+            >
+              Open Aurora People
+            </Link>
+          </div>
         </header>
 
         {/* Centered Scenario Archive */}
@@ -313,6 +322,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/create" element={<ScenarioBuilder onCreated={() => window.location.href = '/'} />} />
           <Route path="/play" element={<PlayGate />} />
+          <Route path="/aurora" element={<AuroraGameCanvas />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>
