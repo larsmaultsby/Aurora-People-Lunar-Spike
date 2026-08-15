@@ -83,7 +83,10 @@ def _is_generic_npc_name(name: str) -> bool:
     e.g. 'young servant', 'gate guardian', 'first raider'.
     """
     import re
-    n = name.lower().strip()
+    stripped = name.strip()
+    if len(stripped.split()) == 1 and stripped[:1].isupper():
+        return False
+    n = stripped.lower()
 
     # Ordinal prefixes: "primeiro saqueador", "second guard", "terceiro bandido"
     ordinal_pt = r"^(primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|sext[oa]|sétim[oa]|oitav[oa]|non[oa]|décim[oa])\b"
