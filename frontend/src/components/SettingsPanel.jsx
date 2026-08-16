@@ -6,7 +6,12 @@ import { Settings, X } from 'lucide-react'
 const PROVIDERS = [
   { id: 'deepseek', label: 'DeepSeek', models: ['deepseek-v4-flash'] },
   { id: 'anthropic', label: 'Anthropic', models: ['claude-opus-5', 'claude-sonnet-5'] },
-  { id: 'openai', label: 'OpenAI', models: ['gpt-5.6-sol'] },
+  { id: 'openai', label: 'OpenAI-compatible / LM Studio', models: [
+    'undi95_-_llama-3-roleplay-8b-evo',
+    'llama-3.1-8b-stheno-v3.4',
+    'qwen3.5-9b-uncensored-hauhaucs-aggressive',
+    'gpt-5.6-sol',
+  ] },
 ]
 
 export default function SettingsPanel({ open, onClose }) {
@@ -85,15 +90,30 @@ export default function SettingsPanel({ open, onClose }) {
             <label className="block text-[10px] font-bold uppercase tracking-widest font-mono text-white/40 mb-2">
               Model
             </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-white/40 focus:bg-white/[0.05] transition-all"
-            >
-              {currentProviderModels.map((m) => (
-                <option key={m} value={m} className="bg-[#1a1a1a] text-white">{m}</option>
-              ))}
-            </select>
+            {provider === 'openai' ? (
+              <>
+                <input
+                  list="openai-compatible-models"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-white/40 focus:bg-white/[0.05] transition-all"
+                  placeholder="LM Studio model identifier"
+                />
+                <datalist id="openai-compatible-models">
+                  {currentProviderModels.map((m) => <option key={m} value={m} />)}
+                </datalist>
+              </>
+            ) : (
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-white/40 focus:bg-white/[0.05] transition-all"
+              >
+                {currentProviderModels.map((m) => (
+                  <option key={m} value={m} className="bg-[#1a1a1a] text-white">{m}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Temperature */}

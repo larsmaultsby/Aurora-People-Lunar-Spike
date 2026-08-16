@@ -1,4 +1,4 @@
-const BASE = '/api'  // proxied to http://localhost:8000 via vite proxy
+const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api` || '/api'  // Vite proxies to the native Lunar backend
 
 export async function checkNeo4j() {
   try {
@@ -105,8 +105,8 @@ export function streamAction({
       action,
       opening_narrative: openingNarrative || '',
       max_tokens: maxTokens || 2000,
-      provider: provider || 'deepseek',
-      model: model || 'deepseek-v4-flash',
+      provider: provider || 'openai',
+      model: model || 'undi95_-_llama-3-roleplay-8b-evo',
       temperature: temperature ?? 0.85,
       combat_enabled: combatEnabled,
     }),

@@ -31,13 +31,13 @@ def test_update_settings(client):
     })
     assert r.status_code == 200
     assert r.json()["provider"] == "openai"
-    assert r.json()["model"] == "gpt-5.6-sol"
+    assert r.json()["model"] == "legacy-openai-model"
 
     r2 = client.get("/api/settings")
     data = r2.json()
     assert data["provider"] == "openai"
-    assert data["model"] == "gpt-5.6-sol"
-    assert data["auxiliary_model"] == "gpt-5.6-sol"
+    assert data["model"] == "legacy-openai-model"
+    assert data["auxiliary_model"] == "legacy-openai-model"
     assert data["temperature"] == 0.5
 
 
@@ -47,7 +47,7 @@ def test_update_settings_invalid_provider_falls_back(client):
         "model": "some-model",
     })
     assert r.status_code == 200
-    assert r.json()["provider"] == "deepseek"
+    assert r.json()["provider"] == "openai"
 
 
 def test_update_settings_anthropic_splits_narrative_and_auxiliary_model(client):

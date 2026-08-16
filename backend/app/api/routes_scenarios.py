@@ -22,6 +22,81 @@ router = APIRouter()
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+_PLAYTEST_TITLE = "Aurora World: Open Sandbox"
+_PLAYTEST_SETUP_QUESTIONS = [
+    {
+        "id": "identity",
+        "var_name": "identity",
+        "prompt": "Who are you in this world? Describe your character in a sentence or two.",
+        "type": "text",
+        "options": [],
+        "allow_custom": True,
+        "required": True,
+    },
+    {
+        "id": "world",
+        "var_name": "world",
+        "prompt": "What kind of world do you want to enter? Genre, era, place, or premise are all fair game.",
+        "type": "text",
+        "options": [],
+        "allow_custom": True,
+        "required": True,
+    },
+    {
+        "id": "desire",
+        "var_name": "desire",
+        "prompt": "What do you want to be doing when play begins?",
+        "type": "text",
+        "options": [],
+        "allow_custom": True,
+        "required": True,
+    },
+    {
+        "id": "tone",
+        "var_name": "tone",
+        "prompt": "What tone should the world have?",
+        "type": "choice",
+        "options": [
+            {"label": "Grounded", "description": "Believable people, consequences, and restrained escalation."},
+            {"label": "Cinematic", "description": "Bigger moments, stronger pacing, and dramatic turns."},
+            {"label": "Dark", "description": "Harsh stakes, danger, and morally difficult situations."},
+            {"label": "Cozy", "description": "Low pressure, relationships, exploration, and everyday life."},
+        ],
+        "allow_custom": True,
+        "required": True,
+    },
+]
+
+
+def _seed_playtest_scenario_if_requested(store: ScenarioStore) -> None:
+    enabled = os.environ.get("LUNAR_SEED_PLAYTEST", "0").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+    if any(s.title == _PLAYTEST_TITLE for s in store.list_scenarios()):
+        return
+    store.create_scenario(
+        title=_PLAYTEST_TITLE,
+        description="A blank-slate LLM world for native Lunar playtesting. You choose who you are and what sort of world you want.",
+        tone_instructions=(
+            "Run a responsive, coherent world shaped by the player's setup answers. "
+            "Prioritize player agency, believable NPC motives, continuity, and concrete sensory detail. "
+            "Do not force a quest or predetermined plot. Let consequences emerge from choices. "
+            "Keep spoken dialogue distinct from physical action and never narrate the player's unchosen thoughts or decisions."
+        ),
+        opening_narrative="The world is waiting for your setup choices.",
+        language="en",
+        lore_text=(
+            "This is an open sandbox. Treat the player's requested world, identity, and starting desire as primary canon. "
+            "Invent only enough surrounding detail to make the world feel alive, then preserve what becomes established."
+        ),
+        setup_questions=_PLAYTEST_SETUP_QUESTIONS,
+        opening_mode="ai",
+        ai_opening_directive=(
+            "Generate an immediate playable opening from the setup answers. Put the player in-scene, establish one or two "
+            "interesting people or pressures, and end with space for the player to act. Do not summarize a backstory or assign a quest."
+        ),
+    )
+
 def _get_store() -> ScenarioStore:
     db_path = os.environ.get("SCENARIO_DB_PATH", os.path.join(_BACKEND_DIR, "scenarios.db"))
     return ScenarioStore(db_path)
@@ -137,6 +212,7 @@ async def preview_opening(req: PreviewOpeningRequest):
 @router.get("/")
 def list_scenarios():
     with _get_store() as store:
+        _seed_playtest_scenario_if_requested(store)
         return [s.__dict__ for s in store.list_scenarios()]
 
 

@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
   const base = normalizeBase(env.VITE_PUBLIC_BASE_PATH)
   const basePrefix = base === '/' ? '' : base.replace(/\/$/, '')
+  const nativeApiProxyPath = `${basePrefix}/api` || '/api'
   const auroraProxyPath = `${basePrefix}/aurora-api` || '/aurora-api'
 
   return {
@@ -20,7 +21,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       allowedHosts: ['localhost', '127.0.0.1', 'maultsby.ngrok.io'],
       proxy: {
-        '/api': { target: env.LUNAR_API_TARGET || 'http://localhost:8000', changeOrigin: true },
+        [nativeApiProxyPath]: {
+          target: env.LUNAR_API_TARGET || 'http://localhost:8000',
+          changeOrigin: true,
+          rewrite: (path) => basePrefix ? path.replace(new RegExp(`^${basePrefix}`), '') : path,
+        },
         [auroraProxyPath]: {
           target: env.AURORA_PEOPLE_API_TARGET || 'http://localhost:4173',
           changeOrigin: true,

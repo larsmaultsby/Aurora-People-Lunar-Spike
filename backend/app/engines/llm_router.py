@@ -324,6 +324,22 @@ class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"
 
 
+_LOCAL_DEFAULT_MODEL = "undi95_-_llama-3-roleplay-8b-evo"
+
+
+def _default_provider() -> LLMProvider:
+    raw = os.environ.get("LUNAR_DEFAULT_PROVIDER", "openai").strip().lower()
+    try:
+        return LLMProvider(raw)
+    except ValueError:
+        logger.warning("Unknown LUNAR_DEFAULT_PROVIDER=%s; falling back to openai", raw)
+        return LLMProvider.OPENAI
+
+
+def _default_model() -> str:
+    return os.environ.get("LUNAR_DEFAULT_MODEL", _LOCAL_DEFAULT_MODEL).strip() or _LOCAL_DEFAULT_MODEL
+
+
 def _reasoning_kwargs(provider: LLMProvider, reasoning: bool) -> dict:
     """DeepSeek V4 counts reasoning against max_tokens; disable it for mechanical calls."""
     if reasoning or provider != LLMProvider.DEEPSEEK:
@@ -508,8 +524,8 @@ def _get_anthropic_client(base_url: str, api_key: str):
 
 @dataclass
 class LLMConfig:
-    primary_provider: LLMProvider = LLMProvider.DEEPSEEK
-    primary_model: str = "deepseek-v4-flash"
+    primary_provider: LLMProvider = field(default_factory=_default_provider)
+    primary_model: str = field(default_factory=_default_model)
     orchestrator_model: str | None = None
     fallback_provider: LLMProvider | None = None
     fallback_model: str | None = None

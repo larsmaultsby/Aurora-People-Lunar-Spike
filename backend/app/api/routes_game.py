@@ -44,21 +44,24 @@ _event_store = EventStore(os.environ.get("EVENT_DB_PATH", os.path.join(_BACKEND_
 _trace_store = TraceStore(os.environ.get("LLM_TRACE_DB_PATH", os.path.join(_BACKEND_DIR, "traces.db")))
 _llm = LLMRouter(LLMConfig())
 
-# Secondary calls (audit, memory, journal, combat, NPCs, plot, opening) run on a
-# cheaper model than the narrative call.
-_OPENAI_MODEL = "gpt-5.6-sol"
+# Local-first defaults. A user-selected OpenAI-compatible model is respected as-is;
+# Aurora can optionally choose a separate auxiliary model through the environment.
+_DEFAULT_PROVIDER = os.environ.get("LUNAR_DEFAULT_PROVIDER", "openai")
+_DEFAULT_MODEL = os.environ.get("LUNAR_DEFAULT_MODEL", "undi95_-_llama-3-roleplay-8b-evo")
 _AUXILIARY_MODELS = {
     LLMProvider.ANTHROPIC: "claude-sonnet-5",
     LLMProvider.DEEPSEEK: "deepseek-v4-flash",
-    LLMProvider.OPENAI: _OPENAI_MODEL,
 }
 
 
 def apply_model_policy(provider: LLMProvider, model: str) -> None:
-    """Narrative runs on `model`; everything else on the provider's auxiliary model."""
-    narrative_model = _OPENAI_MODEL if provider == LLMProvider.OPENAI else model
+    """Narrative runs on the requested model; auxiliaries may be overridden explicitly."""
+    narrative_model = model or _DEFAULT_MODEL
+    auxiliary_model = _AUXILIARY_MODELS.get(provider, narrative_model)
+    if provider == LLMProvider.OPENAI:
+        auxiliary_model = os.environ.get("LUNAR_OPENAI_AUX_MODEL", "").strip() or narrative_model
     _llm.config.primary_provider = provider
-    _llm.config.primary_model = _AUXILIARY_MODELS.get(provider, narrative_model)
+    _llm.config.primary_model = auxiliary_model
     _llm.config.orchestrator_model = narrative_model
 
 
@@ -267,15 +270,15 @@ class PlayerActionRequest(BaseModel):
     action: str = Field(..., min_length=1, max_length=20000)
     opening_narrative: str = Field(default="", max_length=50000)
     max_tokens: int = Field(default=2000, ge=256, le=8192)
-    provider: str = Field(default="deepseek", max_length=20)
-    model: str = Field(default="deepseek-v4-flash", max_length=64)
+    provider: str = Field(default=_DEFAULT_PROVIDER, max_length=20)
+    model: str = Field(default=_DEFAULT_MODEL, max_length=128)
     temperature: float = Field(default=0.85, ge=0.0, le=2.0)
     combat_enabled: bool | None = None
 
 
 class SettingsRequest(BaseModel):
-    provider: str = "deepseek"
-    model: str = "deepseek-v4-flash"
+    provider: str = _DEFAULT_PROVIDER
+    model: str = _DEFAULT_MODEL
     temperature: float = 0.85
     max_tokens: int = 2000
 
