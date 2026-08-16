@@ -695,10 +695,6 @@ class GameSession:
                     f"Current player power: {self._player_power}/10. "
                     "Power ONLY changes with important story events that fundamentally alter "
                     "the character's capabilities — should_update=false for everything else. "
-                    "Using, demonstrating, or succeeding with an ability that was already established "
-                    "in the character setup, opening, or recent scene is NOT a power increase, no matter "
-                    "how impressive the action looks. Only explicit acquisition, loss, transformation, "
-                    "permanent enhancement/weakening, or another genuine change to capability can alter power. "
                     "Regular combat, exploration, conversations, and minor events do NOT change power. "
                     "Maximum change: ±1 per event (±2 only for truly extraordinary transformations). "
                     "new_power must be 0-10 and consistent with the world power scale below.\n"
@@ -708,10 +704,6 @@ class GameSession:
             {
                 "role": "user",
                 "content": (
-                    "AUTHORITATIVE ESTABLISHED PLAYER CAPABILITIES:\n"
-                    f"{(self._character_setup_block or '(none provided)')[:4000]}\n\n"
-                    "ORIGINAL OPENING CONTEXT:\n"
-                    f"{(self._opening_narrative or '(none provided)')[:3000]}\n\n"
                     f"Player action: {player_input}\n"
                     f"Narrative result: {narrative[:8000]}"
                 ),
@@ -1176,9 +1168,9 @@ class GameSession:
             async for chunk in self._handle_narrative(player_input, mode):
                 yield chunk
 
+        # World reactor and auto-plot run async (fire-and-forget)
         if mode != NarrativeMode.META:
-            for chunk in await self._async_world_tick(narrative_time):
-                yield chunk
+            asyncio.create_task(self._async_world_tick(narrative_time))
 
     def _resolve_canonical_name(self, short_name: str, all_names: list[str]) -> str:
         """Resolve a potentially short name to its full canonical form.
@@ -1261,7 +1253,7 @@ class GameSession:
     def _build_audit_world_context(sections: list[str]) -> str:
         """Join the already-built, self-labeled world-context strings (established facts) for the
         auditor's continuity/consistency cross-check. Empty pieces are skipped."""
-        return "\n\n".join(s.strip() for s in sections if isinstance(s, str) and s.strip())
+        return "\n\n".join(s.strip() for s in sections if s and s.strip())
 
     async def _audit_narrative(self, prose: str, player_input: str, world_context: str = "") -> str:
         """FASE 3b: post-hoc auditor over finished prose, best-effort with timeout.
@@ -1459,15 +1451,12 @@ class GameSession:
                 context_window=context_window,
             )
 
-        # Stream the narrator to the player immediately while still accumulating
-        # the complete prose for Lunar's canonical cleanup/audit/state pipeline.
         full_response = ""
         async for chunk in _run(player_input, narrator_history):
             full_response += chunk
-            yield chunk
 
         # Auto-continuation: if the response was truncated mid-sentence,
-        # ask the LLM to finish and stream that continuation immediately too.
+        # ask the LLM to finish instead of just trimming.
         if full_response and not self._is_response_complete(full_response):
             continuation_prompt = (
                 "Continue the narrative EXACTLY where you stopped. "
@@ -1486,22 +1475,15 @@ class GameSession:
             ]
             async for chunk in _run(continuation_prompt, continuation_history):
                 full_response += chunk
-                yield chunk
-
-        # Remember exactly what the player has already seen. Cleanup, inventory-tag
-        # extraction, or the post-hoc auditor may produce a different canonical final
-        # string; the existing TRUNCATE_CLEAN control channel reconciles the visible
-        # assistant message without sacrificing first-token latency.
-        streamed_response = full_response
 
         # Final cleanup: trim truncation and fix number spacing
         cleaned = self._clean_truncated_response(full_response)
         cleaned = self._fix_number_spacing(cleaned)
         full_response = cleaned
 
-        # FASE 3b: post-hoc auditor remains authoritative for the persisted response.
-        # The player can read the provisional stream while the auditor finishes; if it
-        # changes the prose, TRUNCATE_CLEAN replaces the visible message afterward.
+        # FASE 3b: post-hoc auditor before reveal. Surgical, default clean,
+        # best-effort. Runs on the open scene prose so every downstream consumer
+        # (inventory tags, history, crystallization) sees the audited text.
         # raw_player_input is the unwrapped player line (combat injects a [SYSTEM]
         # directive into player_input); the auditor's agency ceiling must be the raw line.
         if _narrator_audit_enabled() and mode != NarrativeMode.META and full_response.strip():
@@ -1513,18 +1495,16 @@ class GameSession:
                 full_response, raw_player_input or player_input, world_context=audit_world_context,
             )
 
-        # Process inventory tags from the canonical response.
+        # Send the clean narrative to frontend (all at once)
+        yield full_response
+
+        # Process inventory tags from response
         clean_response = full_response
         if self._inventory:
             clean_response, inv_events = self._extract_inventory_tags(full_response)
             for inv_event in inv_events:
                 self._apply_inventory_event(inv_event)
                 yield f"[INVENTORY]{json.dumps(inv_event)}"
-
-        # Reconcile the already-streamed UI only when canonical post-processing
-        # changed it (cleanup, audit, or inventory-tag removal).
-        if clean_response != streamed_response:
-            yield f"[TRUNCATE_CLEAN]{clean_response}"
 
         # Verify NPC seed introduction: check if the NPC name appeared in the response
         self._verify_npc_seed_in_response(clean_response)
@@ -1542,13 +1522,13 @@ class GameSession:
         )
         self._last_narrator_event_id = narrator_event.id
 
+        # Fire side-effects async (non-blocking) — journal, NPC minds, graph,
+        # crystallization, power update all run after the narrative is sent.
         if mode != NarrativeMode.META and clean_response:
-            for chunk in await self._async_side_effects(clean_response):
-                yield chunk
+            asyncio.create_task(self._async_side_effects(clean_response))
         else:
-            entry = await self._async_journal(clean_response)
-            if self._is_journal_entry(entry):
-                yield f"[JOURNAL]{json.dumps({'category': entry.category.value, 'summary': entry.summary, 'created_at': entry.created_at})}"
+            # META mode: only journal (lightweight)
+            asyncio.create_task(self._async_journal(clean_response))
 
     async def _process_action_single_call(self, player_input: str, max_tokens: int) -> AsyncIterator[str]:
         """Single LLM call mode for Anthropic: narrative + mode + NPCs + entities in one request."""
@@ -2119,13 +2099,12 @@ class GameSession:
                     exc_info=True,
                 )
 
-    async def _async_side_effects(self, clean_response: str) -> list[str]:
-        """Run side effects after the narrative is sent to the player.
+    async def _async_side_effects(self, clean_response: str) -> None:
+        """Fire-and-forget side effects that run after the narrative is sent to the player.
 
-        These are important for game state. Any errors are logged but never surface
-        to the player.
+        These are important for game state but don't need to block the SSE response.
+        Any errors are logged but never surface to the player.
         """
-        signals: list[str] = []
         try:
             logger.info("_async_side_effects: starting (response %d chars)", len(clean_response))
 
@@ -2137,11 +2116,7 @@ class GameSession:
             self._apply_witnesses_to_recent_turn(witnesses)
 
             # Journal evaluation (lightweight LLM call)
-            entry = await self._async_journal(clean_response, witnessed_by=witnesses)
-            if self._is_journal_entry(entry):
-                signals.append(
-                    f"[JOURNAL]{json.dumps({'category': entry.category.value, 'summary': entry.summary, 'created_at': entry.created_at})}"
-                )
+            await self._async_journal(clean_response, witnessed_by=witnesses)
 
             # NPC mind updates — restricted to NPCs actually present in scene.
             await self._update_npc_minds(clean_response, npcs_present=witnesses)
@@ -2152,9 +2127,7 @@ class GameSession:
             # Memory crystallization (may cascade to higher tiers).
             # Runs after witness stamping so source events carry the right
             # witnessed_by — the consolidation step takes the union.
-            crystal = await self._try_auto_crystallize()
-            if crystal:
-                signals.append(f"[CRYSTAL]{json.dumps({'tier': crystal.tier.value, 'event_count': crystal.event_count})}")
+            await self._try_auto_crystallize()
 
             # Graphiti ingestion
             await self._ingest_to_graphiti(clean_response, "narrator_response")
@@ -2163,36 +2136,25 @@ class GameSession:
             last_player_input = ""
             if len(self._history) >= 2:
                 last_player_input = self._history[-2].get("content", "")
-            power_change = await self._evaluate_power_update(clean_response, last_player_input)
-            if power_change:
-                signals.append(f"[POWER]{json.dumps(power_change)}")
+            await self._evaluate_power_update(clean_response, last_player_input)
 
             logger.info("_async_side_effects: completed")
         except Exception:
             logger.error("_async_side_effects failed", exc_info=True)
-        return signals
 
-    async def _async_world_tick(self, narrative_time: int) -> list[str]:
-        """Run world reactor tick + auto-plot generation."""
-        signals: list[str] = []
+    async def _async_world_tick(self, narrative_time: int) -> None:
+        """Fire-and-forget world reactor tick + auto-plot generation."""
         try:
             if self._graphiti:
                 world_ctx = await self._memory.build_context_window_async(self.campaign_id)
             else:
                 world_ctx = self._memory.build_context_window(self.campaign_id)
-            try:
-                world_changes = await self._world_reactor.process_tick(
-                    campaign_id=self.campaign_id,
-                    narrative_seconds=narrative_time,
-                    world_context=world_ctx,
-                    language=self.language,
-                )
-            except TypeError:
-                world_changes = await self._world_reactor.process_tick(
-                    campaign_id=self.campaign_id,
-                    narrative_seconds=narrative_time,
-                    world_context=world_ctx,
-                )
+            world_changes = await self._world_reactor.process_tick(
+                campaign_id=self.campaign_id,
+                narrative_seconds=narrative_time,
+                world_context=world_ctx,
+                language=self.language,
+            )
             if world_changes:
                 self._event_store.append(
                     campaign_id=self.campaign_id,
@@ -2204,27 +2166,26 @@ class GameSession:
                 )
                 await self._ingest_to_graphiti(world_changes, "world_tick")
 
-            async for chunk in self._maybe_trigger_auto_plot(world_ctx):
-                signals.append(chunk)
+            # Auto-plot (still uses yields internally but we consume them here)
+            async for _ in self._maybe_trigger_auto_plot(world_ctx):
+                pass  # Plot events are persisted in _maybe_trigger_auto_plot
         except Exception:
             logger.error("_async_world_tick failed", exc_info=True)
-        return signals
 
     async def _async_journal(
         self,
         clean_response: str,
         witnessed_by: list[str] | None = None,
-    ):
-        """Evaluate journal entry for a completed narrative response."""
+    ) -> None:
+        """Fire-and-forget journal evaluation."""
         try:
-            return await self._journal.evaluate_and_log(
+            await self._journal.evaluate_and_log(
                 self.campaign_id, clean_response,
                 language=self.language,
                 witnessed_by=witnessed_by,
             )
         except Exception:
             logger.warning("Async journal evaluation failed", exc_info=True)
-            return None
 
     async def _post_narrative_pipeline(self, clean_response: str) -> AsyncIterator[str]:
         """Run all post-narrative side effects: NPC minds, graph, memory, graphiti, power.

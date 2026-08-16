@@ -1,4 +1,4 @@
-const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api` || '/api'  // Vite proxies to the native Lunar backend
+const BASE = '/api'  // proxied to http://localhost:8000 via vite proxy
 
 export async function checkNeo4j() {
   try {
@@ -89,7 +89,6 @@ export function streamAction({
   onCrystal,
   onPlotAuto,
   onInventory,
-  onPower,
   onTruncateClean,
   onUsage,
   onTrace,
@@ -106,8 +105,8 @@ export function streamAction({
       action,
       opening_narrative: openingNarrative || '',
       max_tokens: maxTokens || 2000,
-      provider: provider || 'openai',
-      model: model || 'undi95_-_llama-3-roleplay-8b-evo',
+      provider: provider || 'deepseek',
+      model: model || 'deepseek-v4-flash',
       temperature: temperature ?? 0.85,
       combat_enabled: combatEnabled,
     }),
@@ -153,13 +152,6 @@ export function streamAction({
           try {
             const item = JSON.parse(control.slice(11))
             onInventory?.(item)
-          } catch {}
-          return false
-        }
-        if (control.startsWith('[POWER]')) {
-          try {
-            const power = JSON.parse(control.slice(7))
-            onPower?.(power)
           } catch {}
           return false
         }

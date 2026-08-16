@@ -4,7 +4,6 @@ import { useGameStore } from './store'
 import { fetchScenarios, exportScenario, fetchCampaigns, createCampaign, checkNeo4j, deleteCampaign, deleteScenario, fetchSetupState } from './api'
 import ErrorBoundary from './components/ErrorBoundary'
 import GameCanvas from './components/GameCanvas'
-import AuroraGameCanvas from './components/AuroraGameCanvas'
 import ScenarioBuilder from './components/ScenarioBuilder'
 import SetupWizard from './components/SetupWizard'
 
@@ -131,7 +130,7 @@ function Home() {
       {/* High-Quality Background Image from Nano Banana 2 (Imagen 3) */}
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-60 mix-blend-screen animate-pulse-slow" 
-        style={{ backgroundImage: `url('${import.meta.env.BASE_URL}lunar-bg.jpg')` }}
+        style={{ backgroundImage: "url('/lunar-bg.jpg')" }}
       ></div>
       
       {/* Dark Gradient Overlay */}
@@ -143,7 +142,7 @@ function Home() {
         <header className="mb-16 flex flex-col items-center text-center">
           <div className="mb-8">
             <img 
-              src={`${import.meta.env.BASE_URL}lunar-logo.png`}
+              src="/lunar-logo.png"
               alt="Lunar Logo"
               className="w-64 h-64 md:w-80 md:h-80 object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]"            />
           </div>
@@ -156,21 +155,13 @@ function Home() {
             Localized storytelling core. Multi-agent narrative orchestration with persistent world state and creativity-based resolution.
           </p>
           
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link
-              to="/create"
-              className="group px-12 py-4 bg-white text-black hover:bg-gray-200 transition-all rounded-full font-bold flex items-center gap-4 uppercase text-sm tracking-[0.2em] shadow-[0_0_40px_rgba(255,255,255,0.15)]"
-            >
-              <span className="text-2xl group-hover:rotate-90 transition-transform duration-300">+</span> 
-              Construct Scenario
-            </Link>
-            <Link
-              to="/aurora"
-              className="px-8 py-4 border border-white/20 bg-black/40 hover:bg-white/10 text-white rounded-full font-bold uppercase text-xs tracking-[0.2em] transition-all"
-            >
-              Open Aurora People
-            </Link>
-          </div>
+          <Link
+            to="/create"
+            className="group px-12 py-4 bg-white text-black hover:bg-gray-200 transition-all rounded-full font-bold flex items-center gap-4 uppercase text-sm tracking-[0.2em] shadow-[0_0_40px_rgba(255,255,255,0.15)]"
+          >
+            <span className="text-2xl group-hover:rotate-90 transition-transform duration-300">+</span> 
+            Construct Scenario
+          </Link>
         </header>
 
         {/* Centered Scenario Archive */}
@@ -317,12 +308,11 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <BrowserRouter basename={import.meta.env.BASE_URL === '/' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '')}>
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/create" element={<ScenarioBuilder onCreated={() => window.location.href = import.meta.env.BASE_URL} />} />
+          <Route path="/create" element={<ScenarioBuilder onCreated={() => window.location.href = '/'} />} />
           <Route path="/play" element={<PlayGate />} />
-          <Route path="/aurora" element={<AuroraGameCanvas />} />
         </Routes>
       </BrowserRouter>
     </ErrorBoundary>

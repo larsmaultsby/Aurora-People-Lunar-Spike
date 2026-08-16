@@ -324,22 +324,6 @@ class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"
 
 
-_LOCAL_DEFAULT_MODEL = "undi95_-_llama-3-roleplay-8b-evo"
-
-
-def _default_provider() -> LLMProvider:
-    raw = os.environ.get("LUNAR_DEFAULT_PROVIDER", "openai").strip().lower()
-    try:
-        return LLMProvider(raw)
-    except ValueError:
-        logger.warning("Unknown LUNAR_DEFAULT_PROVIDER=%s; falling back to openai", raw)
-        return LLMProvider.OPENAI
-
-
-def _default_model() -> str:
-    return os.environ.get("LUNAR_DEFAULT_MODEL", _LOCAL_DEFAULT_MODEL).strip() or _LOCAL_DEFAULT_MODEL
-
-
 def _reasoning_kwargs(provider: LLMProvider, reasoning: bool) -> dict:
     """DeepSeek V4 counts reasoning against max_tokens; disable it for mechanical calls."""
     if reasoning or provider != LLMProvider.DEEPSEEK:
@@ -524,8 +508,8 @@ def _get_anthropic_client(base_url: str, api_key: str):
 
 @dataclass
 class LLMConfig:
-    primary_provider: LLMProvider = field(default_factory=_default_provider)
-    primary_model: str = field(default_factory=_default_model)
+    primary_provider: LLMProvider = LLMProvider.DEEPSEEK
+    primary_model: str = "deepseek-v4-flash"
     orchestrator_model: str | None = None
     fallback_provider: LLMProvider | None = None
     fallback_model: str | None = None
@@ -760,16 +744,10 @@ class LLMRouter:
         if api_base:
             call_kwargs["api_base"] = api_base
             call_kwargs["api_key"] = self._get_api_key(self.config.primary_provider)
-
-        # Anthropic proxy traffic keeps the conservative compatibility path.
-        # Its CLI proxy can emit SSE fields that older litellm versions do not
-        # parse reliably, and cached requests must use the Anthropic SDK to
-        # preserve cache_control. OpenAI-compatible proxies (notably LM Studio)
-        # intentionally fall through to the normal stream=True path below.
-        if api_base and self.config.primary_provider == LLMProvider.ANTHROPIC:
             # FASE 2: cached-form Anthropic requests go through the anthropic SDK
             # directly. litellm strips content-block cache_control, killing the cache.
-            if _has_cache_control(messages):
+            if (self.config.primary_provider == LLMProvider.ANTHROPIC
+                    and _has_cache_control(messages)):
                 t0 = time.monotonic()
                 resp = await self._complete_anthropic_sdk(
                     messages, max_tokens, model, api_base,
@@ -781,10 +759,10 @@ class LLMRouter:
                 if content:
                     yield content
                 return
-
-            # Non-cached Anthropic proxy requests retain the existing sync fallback.
-            # Retry transient proxy/upstream failures so a single hiccup does not
-            # surface the hardcoded narrator fallback to the player.
+            # CLIProxyAPI streaming adds extra fields that confuse litellm's
+            # SSE parser, so fall back to non-streaming and yield the result.
+            # Retry on transient proxy/upstream failures so a single hiccup
+            # doesn't surface the hardcoded English fallback to the player.
             t0 = time.monotonic()
             last_exc: Exception | None = None
             response = None

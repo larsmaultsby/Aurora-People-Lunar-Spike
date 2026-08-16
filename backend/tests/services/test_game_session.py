@@ -83,65 +83,12 @@ def session(mock_narrator, mock_memory, mock_world_reactor, mock_journal, mock_e
 
 
 @pytest.mark.asyncio
-async def test_narrative_action_streams_chunks(session, mock_narrator, monkeypatch):
-    monkeypatch.setenv("LUNAR_FEATURE_NARRATOR_AUDIT", "0")
-    mock_narrator.stream_narrative = MagicMock(return_value=async_gen("First ", "second."))
-    mock_narrator.stream_narrative_cached = MagicMock(
-        side_effect=lambda *a, **k: async_gen("First ", "second.")
-    )
-
+async def test_narrative_action_streams_chunks(session):
     chunks = []
     async for chunk in session.process_action("I walk to the tavern"):
         chunks.append(chunk)
-
-    first_index = chunks.index("First ")
-    second_index = chunks.index("second.")
-    assert first_index < second_index
-
-
-@pytest.mark.asyncio
-async def test_streamed_narrative_reconciles_to_audited_canonical_text(
-    session, mock_narrator, monkeypatch
-):
-    monkeypatch.setenv("LUNAR_FEATURE_NARRATOR_AUDIT", "1")
-    mock_narrator.stream_narrative = MagicMock(return_value=async_gen("Original."))
-    mock_narrator.stream_narrative_cached = MagicMock(
-        side_effect=lambda *a, **k: async_gen("Original.")
-    )
-    session._audit_narrative = AsyncMock(return_value="Audited.")
-
-    chunks = []
-    async for chunk in session.process_action("I inspect the room"):
-        chunks.append(chunk)
-
-    assert "Original." in chunks
-    replacement = "[TRUNCATE_CLEAN]Audited."
-    assert replacement in chunks
-    assert chunks.index("Original.") < chunks.index(replacement)
-
-
-@pytest.mark.asyncio
-async def test_power_evaluator_receives_established_capability_context(session, mock_combat):
-    session._character_setup_block = "The player can manipulate time and reality."
-    session._opening_narrative = "The player begins in Victorian England."
-    session._player_power = 3
-    mock_combat._llm.complete = AsyncMock(
-        return_value='{"should_update": false, "new_power": 3, "reason": "existing ability"}'
-    )
-
-    result = await session._evaluate_power_update(
-        "Time freezes around the player.",
-        "I stop time.",
-    )
-
-    assert result is None
-    messages = mock_combat._llm.complete.call_args.kwargs["messages"]
-    system_text = messages[0]["content"]
-    user_text = messages[1]["content"]
-    assert "already established" in system_text
-    assert "NOT a power increase" in system_text
-    assert "manipulate time and reality" in user_text
-    assert "Victorian England" in user_text
+    assert len(chunks) > 0
+    assert "Once" in chunks or any("Once" in c for c in chunks)
 
 
 @pytest.mark.asyncio

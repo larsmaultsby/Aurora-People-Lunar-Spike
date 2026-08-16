@@ -20,7 +20,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "http://localhost:5184",
         "http://localhost:3000",
     ],
     allow_credentials=True,
@@ -54,8 +53,8 @@ async def health_neo4j():
 
 
 class SettingsUpdateRequest(BaseModel):
-    provider: str = "openai"
-    model: str = "undi95_-_llama-3-roleplay-8b-evo"
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     temperature: float = 0.85
     max_tokens: int = 2000
 
@@ -65,7 +64,7 @@ def update_settings(req: SettingsUpdateRequest):
     try:
         provider = LLMProvider(req.provider)
     except ValueError:
-        provider = LLMProvider.OPENAI
+        provider = LLMProvider.DEEPSEEK
     _llm.config.temperature = req.temperature
     _llm.config.max_tokens = req.max_tokens
     apply_model_policy(provider, req.model)

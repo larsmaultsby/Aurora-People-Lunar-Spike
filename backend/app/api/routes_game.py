@@ -44,46 +44,22 @@ _event_store = EventStore(os.environ.get("EVENT_DB_PATH", os.path.join(_BACKEND_
 _trace_store = TraceStore(os.environ.get("LLM_TRACE_DB_PATH", os.path.join(_BACKEND_DIR, "traces.db")))
 _llm = LLMRouter(LLMConfig())
 
-# Local-first defaults. A user-selected OpenAI-compatible model is respected as-is;
-# Aurora can optionally choose a separate auxiliary model through the environment.
-_DEFAULT_PROVIDER = os.environ.get("LUNAR_DEFAULT_PROVIDER", "openai")
-_DEFAULT_MODEL = os.environ.get("LUNAR_DEFAULT_MODEL", "undi95_-_llama-3-roleplay-8b-evo")
+# Secondary calls (audit, memory, journal, combat, NPCs, plot, opening) run on a
+# cheaper model than the narrative call.
+_OPENAI_MODEL = "gpt-5.6-sol"
 _AUXILIARY_MODELS = {
     LLMProvider.ANTHROPIC: "claude-sonnet-5",
     LLMProvider.DEEPSEEK: "deepseek-v4-flash",
+    LLMProvider.OPENAI: _OPENAI_MODEL,
 }
 
 
 def apply_model_policy(provider: LLMProvider, model: str) -> None:
-    """Narrative runs on the requested model; auxiliaries may be overridden explicitly."""
-    narrative_model = model or _DEFAULT_MODEL
-    auxiliary_model = _AUXILIARY_MODELS.get(provider, narrative_model)
-    if provider == LLMProvider.OPENAI:
-        auxiliary_model = os.environ.get("LUNAR_OPENAI_AUX_MODEL", "").strip() or narrative_model
+    """Narrative runs on `model`; everything else on the provider's auxiliary model."""
+    narrative_model = _OPENAI_MODEL if provider == LLMProvider.OPENAI else model
     _llm.config.primary_provider = provider
-    _llm.config.primary_model = auxiliary_model
+    _llm.config.primary_model = _AUXILIARY_MODELS.get(provider, narrative_model)
     _llm.config.orchestrator_model = narrative_model
-
-
-def _effective_temperature(requested: float) -> float:
-    """Return an optional runtime-forced temperature for controlled playtests.
-
-    Normal Lunar behavior remains client-driven. Aurora World can temporarily
-    set ``LUNAR_FORCE_TEMPERATURE`` in the managed runtime to hold sampling
-    constant without mutating browser or campaign settings.
-    """
-    raw = os.environ.get("LUNAR_FORCE_TEMPERATURE", "").strip()
-    if not raw:
-        return requested
-    try:
-        forced = float(raw)
-    except ValueError:
-        logger.warning("Ignoring invalid LUNAR_FORCE_TEMPERATURE=%r", raw)
-        return requested
-    if not 0.0 <= forced <= 2.0:
-        logger.warning("Ignoring out-of-range LUNAR_FORCE_TEMPERATURE=%r", raw)
-        return requested
-    return forced
 
 
 _narrator = NarratorEngine(llm=_llm)
@@ -291,15 +267,15 @@ class PlayerActionRequest(BaseModel):
     action: str = Field(..., min_length=1, max_length=20000)
     opening_narrative: str = Field(default="", max_length=50000)
     max_tokens: int = Field(default=2000, ge=256, le=8192)
-    provider: str = Field(default=_DEFAULT_PROVIDER, max_length=20)
-    model: str = Field(default=_DEFAULT_MODEL, max_length=128)
+    provider: str = Field(default="deepseek", max_length=20)
+    model: str = Field(default="deepseek-v4-flash", max_length=64)
     temperature: float = Field(default=0.85, ge=0.0, le=2.0)
     combat_enabled: bool | None = None
 
 
 class SettingsRequest(BaseModel):
-    provider: str = _DEFAULT_PROVIDER
-    model: str = _DEFAULT_MODEL
+    provider: str = "deepseek"
+    model: str = "deepseek-v4-flash"
     temperature: float = 0.85
     max_tokens: int = 2000
 
@@ -370,7 +346,7 @@ async def player_action(req: PlayerActionRequest):
     except ValueError:
         provider = _llm.config.primary_provider
     apply_model_policy(provider, req.model)
-    _llm.config.temperature = _effective_temperature(req.temperature)
+    _llm.config.temperature = req.temperature
     _llm.config.max_tokens = req.max_tokens
     if req.combat_enabled is not None:
         session.set_combat_enabled(req.combat_enabled)
@@ -668,8 +644,7 @@ async def rewind(campaign_id: str):
 
 @router.get("/{campaign_id}/journal")
 async def get_journal(campaign_id: str, category: str | None = None):
-    if campaign_id not in _journal._journals:
-        _ensure_session(campaign_id)
+    _ensure_session(campaign_id)
     if category:
         try:
             cat = JournalCategory(category)
@@ -839,19 +814,12 @@ async def timeskip(campaign_id: str, req: TimeskipRequest):
     )
     world_ctx = _memory.build_context_window(campaign_id)
     session_language = _sessions[campaign_id].language if campaign_id in _sessions else "en"
-    try:
-        world_changes = await _world_reactor.process_tick(
-            campaign_id=campaign_id,
-            narrative_seconds=req.seconds,
-            world_context=world_ctx,
-            language=session_language,
-        )
-    except TypeError:
-        world_changes = await _world_reactor.process_tick(
-            campaign_id=campaign_id,
-            narrative_seconds=req.seconds,
-            world_context=world_ctx,
-        )
+    world_changes = await _world_reactor.process_tick(
+        campaign_id=campaign_id,
+        narrative_seconds=req.seconds,
+        world_context=world_ctx,
+        language=session_language,
+    )
     if world_changes:
         _event_store.append(
             campaign_id=campaign_id,

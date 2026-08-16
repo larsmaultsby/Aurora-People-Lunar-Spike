@@ -12,29 +12,6 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def test_effective_temperature_uses_requested_value_when_unforced(monkeypatch):
-    from app.api import routes_game
-
-    monkeypatch.delenv("LUNAR_FORCE_TEMPERATURE", raising=False)
-    assert routes_game._effective_temperature(0.85) == 0.85
-
-
-def test_effective_temperature_uses_runtime_override(monkeypatch):
-    from app.api import routes_game
-
-    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "0.6")
-    assert routes_game._effective_temperature(0.85) == 0.6
-
-
-def test_effective_temperature_ignores_invalid_override(monkeypatch):
-    from app.api import routes_game
-
-    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "not-a-number")
-    assert routes_game._effective_temperature(0.85) == 0.85
-    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "2.5")
-    assert routes_game._effective_temperature(0.85) == 0.85
-
-
 def test_get_settings(client):
     r = client.get("/api/settings")
     assert r.status_code == 200
@@ -54,13 +31,13 @@ def test_update_settings(client):
     })
     assert r.status_code == 200
     assert r.json()["provider"] == "openai"
-    assert r.json()["model"] == "legacy-openai-model"
+    assert r.json()["model"] == "gpt-5.6-sol"
 
     r2 = client.get("/api/settings")
     data = r2.json()
     assert data["provider"] == "openai"
-    assert data["model"] == "legacy-openai-model"
-    assert data["auxiliary_model"] == "legacy-openai-model"
+    assert data["model"] == "gpt-5.6-sol"
+    assert data["auxiliary_model"] == "gpt-5.6-sol"
     assert data["temperature"] == 0.5
 
 
@@ -70,7 +47,7 @@ def test_update_settings_invalid_provider_falls_back(client):
         "model": "some-model",
     })
     assert r.status_code == 200
-    assert r.json()["provider"] == "openai"
+    assert r.json()["provider"] == "deepseek"
 
 
 def test_update_settings_anthropic_splits_narrative_and_auxiliary_model(client):

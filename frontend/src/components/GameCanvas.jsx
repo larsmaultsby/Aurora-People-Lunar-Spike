@@ -526,10 +526,7 @@ export default function GameCanvas() {
                 const displayContent = isUser ? msg.content : msg.content
                   .replace(/\[ITEM_ADD:[^\]]+\]/g, '')
                   .replace(/\[ITEM_USE:[^\]]+\]/g, '')
-                  .replace(/\[ITEM_LOSE:[^\]]+\]/g, '')
-                  // Defense in depth for old/persisted sessions: protocol metadata
-                  // must never render as narrator prose even if it bypassed SSE parsing.
-                  .replace(/\[POWER\]\{[^\n]*\}/g, '');
+                  .replace(/\[ITEM_LOSE:[^\]]+\]/g, '');
                 return (
                   <div key={i} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
                     {isUser ? (
