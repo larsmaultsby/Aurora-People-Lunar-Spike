@@ -121,6 +121,30 @@ async def test_streamed_narrative_reconciles_to_audited_canonical_text(
 
 
 @pytest.mark.asyncio
+async def test_power_evaluator_receives_established_capability_context(session, mock_combat):
+    session._character_setup_block = "The player can manipulate time and reality."
+    session._opening_narrative = "The player begins in Victorian England."
+    session._player_power = 3
+    mock_combat._llm.complete = AsyncMock(
+        return_value='{"should_update": false, "new_power": 3, "reason": "existing ability"}'
+    )
+
+    result = await session._evaluate_power_update(
+        "Time freezes around the player.",
+        "I stop time.",
+    )
+
+    assert result is None
+    messages = mock_combat._llm.complete.call_args.kwargs["messages"]
+    system_text = messages[0]["content"]
+    user_text = messages[1]["content"]
+    assert "already established" in system_text
+    assert "NOT a power increase" in system_text
+    assert "manipulate time and reality" in user_text
+    assert "Victorian England" in user_text
+
+
+@pytest.mark.asyncio
 async def test_narrative_action_logs_to_event_store(session, mock_event_store):
     async for _ in session.process_action("I look around"):
         pass

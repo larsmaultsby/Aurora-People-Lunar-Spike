@@ -695,6 +695,10 @@ class GameSession:
                     f"Current player power: {self._player_power}/10. "
                     "Power ONLY changes with important story events that fundamentally alter "
                     "the character's capabilities — should_update=false for everything else. "
+                    "Using, demonstrating, or succeeding with an ability that was already established "
+                    "in the character setup, opening, or recent scene is NOT a power increase, no matter "
+                    "how impressive the action looks. Only explicit acquisition, loss, transformation, "
+                    "permanent enhancement/weakening, or another genuine change to capability can alter power. "
                     "Regular combat, exploration, conversations, and minor events do NOT change power. "
                     "Maximum change: ±1 per event (±2 only for truly extraordinary transformations). "
                     "new_power must be 0-10 and consistent with the world power scale below.\n"
@@ -704,6 +708,10 @@ class GameSession:
             {
                 "role": "user",
                 "content": (
+                    "AUTHORITATIVE ESTABLISHED PLAYER CAPABILITIES:\n"
+                    f"{(self._character_setup_block or '(none provided)')[:4000]}\n\n"
+                    "ORIGINAL OPENING CONTEXT:\n"
+                    f"{(self._opening_narrative or '(none provided)')[:3000]}\n\n"
                     f"Player action: {player_input}\n"
                     f"Narrative result: {narrative[:8000]}"
                 ),

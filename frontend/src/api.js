@@ -89,6 +89,7 @@ export function streamAction({
   onCrystal,
   onPlotAuto,
   onInventory,
+  onPower,
   onTruncateClean,
   onUsage,
   onTrace,
@@ -152,6 +153,13 @@ export function streamAction({
           try {
             const item = JSON.parse(control.slice(11))
             onInventory?.(item)
+          } catch {}
+          return false
+        }
+        if (control.startsWith('[POWER]')) {
+          try {
+            const power = JSON.parse(control.slice(7))
+            onPower?.(power)
           } catch {}
           return false
         }
