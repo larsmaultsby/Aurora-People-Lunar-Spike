@@ -24,6 +24,8 @@ The native composer preserves Lunar's original action modes:
 
 Native actions stream from Lunar's FastAPI backend over SSE.
 
+When Aurora World is served under the shared `/lunar/` public base path, Vite hot-module reload and its development WebSocket are disabled. This keeps public play sessions stable behind the shared ngrok proxy and prevents another Aurora Vite application's reload socket from triggering page refreshes. Root-hosted local development keeps normal Vite HMR.
+
 ## Seeded sandbox
 
 When `LUNAR_SEED_PLAYTEST=1`, the scenario list creates `Aurora World: Open Sandbox` once if it does not already exist. Normal production/data flows are unchanged when the flag is absent.
