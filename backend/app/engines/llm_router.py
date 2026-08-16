@@ -760,10 +760,16 @@ class LLMRouter:
         if api_base:
             call_kwargs["api_base"] = api_base
             call_kwargs["api_key"] = self._get_api_key(self.config.primary_provider)
+
+        # Anthropic proxy traffic keeps the conservative compatibility path.
+        # Its CLI proxy can emit SSE fields that older litellm versions do not
+        # parse reliably, and cached requests must use the Anthropic SDK to
+        # preserve cache_control. OpenAI-compatible proxies (notably LM Studio)
+        # intentionally fall through to the normal stream=True path below.
+        if api_base and self.config.primary_provider == LLMProvider.ANTHROPIC:
             # FASE 2: cached-form Anthropic requests go through the anthropic SDK
             # directly. litellm strips content-block cache_control, killing the cache.
-            if (self.config.primary_provider == LLMProvider.ANTHROPIC
-                    and _has_cache_control(messages)):
+            if _has_cache_control(messages):
                 t0 = time.monotonic()
                 resp = await self._complete_anthropic_sdk(
                     messages, max_tokens, model, api_base,
@@ -775,10 +781,10 @@ class LLMRouter:
                 if content:
                     yield content
                 return
-            # CLIProxyAPI streaming adds extra fields that confuse litellm's
-            # SSE parser, so fall back to non-streaming and yield the result.
-            # Retry on transient proxy/upstream failures so a single hiccup
-            # doesn't surface the hardcoded English fallback to the player.
+
+            # Non-cached Anthropic proxy requests retain the existing sync fallback.
+            # Retry transient proxy/upstream failures so a single hiccup does not
+            # surface the hardcoded narrator fallback to the player.
             t0 = time.monotonic()
             last_exc: Exception | None = None
             response = None
