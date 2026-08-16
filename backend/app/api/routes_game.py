@@ -65,6 +65,27 @@ def apply_model_policy(provider: LLMProvider, model: str) -> None:
     _llm.config.orchestrator_model = narrative_model
 
 
+def _effective_temperature(requested: float) -> float:
+    """Return an optional runtime-forced temperature for controlled playtests.
+
+    Normal Lunar behavior remains client-driven. Aurora World can temporarily
+    set ``LUNAR_FORCE_TEMPERATURE`` in the managed runtime to hold sampling
+    constant without mutating browser or campaign settings.
+    """
+    raw = os.environ.get("LUNAR_FORCE_TEMPERATURE", "").strip()
+    if not raw:
+        return requested
+    try:
+        forced = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid LUNAR_FORCE_TEMPERATURE=%r", raw)
+        return requested
+    if not 0.0 <= forced <= 2.0:
+        logger.warning("Ignoring out-of-range LUNAR_FORCE_TEMPERATURE=%r", raw)
+        return requested
+    return forced
+
+
 _narrator = NarratorEngine(llm=_llm)
 _memory = MemoryEngine(event_store=_event_store, llm=_llm)
 _world_reactor = WorldReactor(llm=_llm)
@@ -349,7 +370,7 @@ async def player_action(req: PlayerActionRequest):
     except ValueError:
         provider = _llm.config.primary_provider
     apply_model_policy(provider, req.model)
-    _llm.config.temperature = req.temperature
+    _llm.config.temperature = _effective_temperature(req.temperature)
     _llm.config.max_tokens = req.max_tokens
     if req.combat_enabled is not None:
         session.set_combat_enabled(req.combat_enabled)

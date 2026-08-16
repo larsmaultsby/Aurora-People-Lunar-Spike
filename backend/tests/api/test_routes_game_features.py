@@ -12,6 +12,29 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
+def test_effective_temperature_uses_requested_value_when_unforced(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.delenv("LUNAR_FORCE_TEMPERATURE", raising=False)
+    assert routes_game._effective_temperature(0.85) == 0.85
+
+
+def test_effective_temperature_uses_runtime_override(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "0.6")
+    assert routes_game._effective_temperature(0.85) == 0.6
+
+
+def test_effective_temperature_ignores_invalid_override(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "not-a-number")
+    assert routes_game._effective_temperature(0.85) == 0.85
+    monkeypatch.setenv("LUNAR_FORCE_TEMPERATURE", "2.5")
+    assert routes_game._effective_temperature(0.85) == 0.85
+
+
 def test_get_settings(client):
     r = client.get("/api/settings")
     assert r.status_code == 200
