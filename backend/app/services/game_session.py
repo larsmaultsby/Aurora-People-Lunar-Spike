@@ -1451,12 +1451,15 @@ class GameSession:
                 context_window=context_window,
             )
 
+        # Stream the narrator to the player immediately while still accumulating
+        # the complete prose for Lunar's canonical cleanup/audit/state pipeline.
         full_response = ""
         async for chunk in _run(player_input, narrator_history):
             full_response += chunk
+            yield chunk
 
         # Auto-continuation: if the response was truncated mid-sentence,
-        # ask the LLM to finish instead of just trimming.
+        # ask the LLM to finish and stream that continuation immediately too.
         if full_response and not self._is_response_complete(full_response):
             continuation_prompt = (
                 "Continue the narrative EXACTLY where you stopped. "
@@ -1475,15 +1478,22 @@ class GameSession:
             ]
             async for chunk in _run(continuation_prompt, continuation_history):
                 full_response += chunk
+                yield chunk
+
+        # Remember exactly what the player has already seen. Cleanup, inventory-tag
+        # extraction, or the post-hoc auditor may produce a different canonical final
+        # string; the existing TRUNCATE_CLEAN control channel reconciles the visible
+        # assistant message without sacrificing first-token latency.
+        streamed_response = full_response
 
         # Final cleanup: trim truncation and fix number spacing
         cleaned = self._clean_truncated_response(full_response)
         cleaned = self._fix_number_spacing(cleaned)
         full_response = cleaned
 
-        # FASE 3b: post-hoc auditor before reveal. Surgical, default clean,
-        # best-effort. Runs on the open scene prose so every downstream consumer
-        # (inventory tags, history, crystallization) sees the audited text.
+        # FASE 3b: post-hoc auditor remains authoritative for the persisted response.
+        # The player can read the provisional stream while the auditor finishes; if it
+        # changes the prose, TRUNCATE_CLEAN replaces the visible message afterward.
         # raw_player_input is the unwrapped player line (combat injects a [SYSTEM]
         # directive into player_input); the auditor's agency ceiling must be the raw line.
         if _narrator_audit_enabled() and mode != NarrativeMode.META and full_response.strip():
@@ -1495,16 +1505,18 @@ class GameSession:
                 full_response, raw_player_input or player_input, world_context=audit_world_context,
             )
 
-        # Send the clean narrative to frontend (all at once)
-        yield full_response
-
-        # Process inventory tags from response
+        # Process inventory tags from the canonical response.
         clean_response = full_response
         if self._inventory:
             clean_response, inv_events = self._extract_inventory_tags(full_response)
             for inv_event in inv_events:
                 self._apply_inventory_event(inv_event)
                 yield f"[INVENTORY]{json.dumps(inv_event)}"
+
+        # Reconcile the already-streamed UI only when canonical post-processing
+        # changed it (cleanup, audit, or inventory-tag removal).
+        if clean_response != streamed_response:
+            yield f"[TRUNCATE_CLEAN]{clean_response}"
 
         # Verify NPC seed introduction: check if the NPC name appeared in the response
         self._verify_npc_seed_in_response(clean_response)

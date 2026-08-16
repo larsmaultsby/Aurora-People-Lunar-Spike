@@ -83,12 +83,41 @@ def session(mock_narrator, mock_memory, mock_world_reactor, mock_journal, mock_e
 
 
 @pytest.mark.asyncio
-async def test_narrative_action_streams_chunks(session):
+async def test_narrative_action_streams_chunks(session, mock_narrator, monkeypatch):
+    monkeypatch.setenv("LUNAR_FEATURE_NARRATOR_AUDIT", "0")
+    mock_narrator.stream_narrative = MagicMock(return_value=async_gen("First ", "second."))
+    mock_narrator.stream_narrative_cached = MagicMock(
+        side_effect=lambda *a, **k: async_gen("First ", "second.")
+    )
+
     chunks = []
     async for chunk in session.process_action("I walk to the tavern"):
         chunks.append(chunk)
-    assert len(chunks) > 0
-    assert "Once" in chunks or any("Once" in c for c in chunks)
+
+    first_index = chunks.index("First ")
+    second_index = chunks.index("second.")
+    assert first_index < second_index
+
+
+@pytest.mark.asyncio
+async def test_streamed_narrative_reconciles_to_audited_canonical_text(
+    session, mock_narrator, monkeypatch
+):
+    monkeypatch.setenv("LUNAR_FEATURE_NARRATOR_AUDIT", "1")
+    mock_narrator.stream_narrative = MagicMock(return_value=async_gen("Original."))
+    mock_narrator.stream_narrative_cached = MagicMock(
+        side_effect=lambda *a, **k: async_gen("Original.")
+    )
+    session._audit_narrative = AsyncMock(return_value="Audited.")
+
+    chunks = []
+    async for chunk in session.process_action("I inspect the room"):
+        chunks.append(chunk)
+
+    assert "Original." in chunks
+    replacement = "[TRUNCATE_CLEAN]Audited."
+    assert replacement in chunks
+    assert chunks.index("Original.") < chunks.index(replacement)
 
 
 @pytest.mark.asyncio
