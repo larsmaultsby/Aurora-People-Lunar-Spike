@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port: 5173,
+      allowedHosts: ['maultsby.ngrok.io'],
       proxy: {
         '/api': {
           target: env.LUNAR_API_TARGET || 'http://localhost:8000',
