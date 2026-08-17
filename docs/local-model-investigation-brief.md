@@ -32,11 +32,15 @@ Measured machine and runtime state:
 - project/data volume free space after cleanup: about 27 GiB
 - active loaded model after setup: `qwen3-14b-abliterated` served as `gpt-5.6-sol`, 8k context, 4-way parallel; LM Studio estimated 8.38 GiB and reports 9.00 GB loaded.
 - Qwen setup smoke test: a normal OpenAI-compatible chat completion through `gpt-5.6-sol` returned player-facing prose with `reasoning_content: ""` and `reasoning_tokens: 0`. This is only a route/sanity check, not a full Blackwater qualification.
+- later 24B uncensored swap: downloaded `Mungert/Dolphin-Mistral-24B-Venice-Edition-GGUF`, `Dolphin-Mistral-24B-Venice-Edition-q4_k_m.gguf`, 14.53 GB.
+- active loaded model after 24B swap: `dolphin-mistral-24b-venice-edition` served as `gpt-5.6-sol`, 8k context, 2-way parallel; LM Studio estimated/loaded 13.53 GiB.
+- 24B smoke test: a normal OpenAI-compatible Blackwater-style completion through `gpt-5.6-sol` returned `reasoning_content: ""` and `reasoning_tokens: 0`, but took about 34.9 seconds for 220 completion tokens and hit the token cap mid-sentence. It also included a minor player-emotion takeover phrase (`you can't help but feel...`). Treat the route as live, but do not consider the model qualified until the full benchmark measures latency, completion behavior, and player-agency discipline.
 
 The current local LM Studio model inventory after cleanup is:
 
 - `dolphin-2.9.3-mistral-nemo-12b` — 12B, 7.12 GB in LM Studio; preserved as the current Sol-path fallback if Qwen fails.
-- `qwen3-14b-abliterated` — 14B, 9.00 GB in LM Studio; currently loaded as `gpt-5.6-sol` for the next salvage test.
+- `qwen3-14b-abliterated` — 14B, 9.00 GB in LM Studio; preserved as the prior salvage candidate.
+- `dolphin-mistral-24b-venice-edition` — 24B, 14.53 GB in LM Studio; currently loaded as `gpt-5.6-sol` for the uncensored 24B test.
 - `jina-embeddings-v5-text-small-retrieval` — 0.6B, 639.45 MB.
 - `text-embedding-nomic-embed-text-v1.5` — 84.11 MB embedding model listed by LM Studio.
 
