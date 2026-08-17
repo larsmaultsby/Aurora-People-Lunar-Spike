@@ -168,6 +168,28 @@ def test_narrator_rules_bound_new_npc_knowledge(engine):
     assert "state the inference with uncertainty" in prompt
 
 
+def test_narrator_rules_forbid_action_menu_protocol_leakage(engine):
+    prompt = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="en",
+    )
+
+    assert "NEVER offer a menu of suggested next actions" in prompt
+    assert "Do you:" in prompt
+    for token in ("[SAY]", "[DO]", "[CONTINUE]", "[META]"):
+        assert token in prompt
+    assert "not narrator output" in prompt
+
+    prompt_pt = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="pt-br",
+    )
+    assert "NUNCA ofereça um menu" in prompt_pt
+    assert "não a saída do narrador" in prompt_pt
+
+
 def test_build_meta_prompt_is_out_of_character(engine):
     prompt = engine.build_meta_prompt(
         language="en",
