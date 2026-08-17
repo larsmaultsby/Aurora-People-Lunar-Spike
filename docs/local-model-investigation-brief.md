@@ -16,6 +16,40 @@ Related documents:
 
 ## Verified current state
 
+### Local inventory update — 2026-08-17
+
+Measured machine and runtime state:
+
+- Mac model: `Mac16,8`
+- chip: Apple M4 Pro
+- unified memory: 24 GB
+- LM Studio app observed: `0.4.19+2`
+- LM Studio llama.cpp backend observed: `llama.cpp-mac-arm64-apple-metal-advsimd-2.27.1`
+- active loaded model before Qwen setup: `dolphin-2.9.3-mistral-nemo-12b`
+- active load settings observed: 8k context, 4-way parallel, full Metal offload, f16 KV cache, flash attention on
+- active loaded process RSS observed: about 6.95 GB
+- project/data volume free space before cleanup: about 10 GiB
+- project/data volume free space after cleanup: about 27 GiB
+- active loaded model after setup: `qwen3-14b-abliterated` served as `gpt-5.6-sol`, 8k context, 4-way parallel; LM Studio estimated 8.38 GiB and reports 9.00 GB loaded.
+- Qwen setup smoke test: a normal OpenAI-compatible chat completion through `gpt-5.6-sol` returned player-facing prose with `reasoning_content: ""` and `reasoning_tokens: 0`. This is only a route/sanity check, not a full Blackwater qualification.
+
+The current local LM Studio model inventory after cleanup is:
+
+- `dolphin-2.9.3-mistral-nemo-12b` — 12B, 7.12 GB in LM Studio; preserved as the current Sol-path fallback if Qwen fails.
+- `qwen3-14b-abliterated` — 14B, 9.00 GB in LM Studio; currently loaded as `gpt-5.6-sol` for the next salvage test.
+- `jina-embeddings-v5-text-small-retrieval` — 0.6B, 639.45 MB.
+- `text-embedding-nomic-embed-text-v1.5` — 84.11 MB embedding model listed by LM Studio.
+
+An unrelated Ollama install also contains `mistral:latest` at about 4.1 GB, but Aurora World is currently pinned through LM Studio/OpenAI-compatible routing, so this is not part of the recommended test path.
+
+The following local LM Studio models were removed because the investigation brief had already rejected them and they were redundant for the next test path:
+
+- `undi95_-_llama-3-roleplay-8b-evo`
+- `llama-3.1-8b-stheno-v3.4`
+- `qwen3.5-9b-uncensored-hauhaucs-aggressive`
+
+Do not remove `dolphin-2.9.3-mistral-nemo-12b` until a better Sol-path narrator is selected, because it is the current technically stable fallback. Do not remove `qwen3-14b-abliterated` before the thinking-off salvage test below.
+
 ### Runtime ownership
 
 Aurora World uses native Project Lunar as its primary playable runtime.
@@ -262,7 +296,7 @@ Strong uncensored behavior must not come at the expense of instruction hierarchy
 
 ### 3. Can Qwen3 14B be salvaged with correct serving configuration?
 
-Investigate only if practical.
+Investigate first. It is already installed, it fits on this machine, and LM Studio already has a local `thinking_off` preset whose load operation sets `llm.prediction.reasoning.enableThinking` to `false`.
 
 Determine whether LM Studio can serve `qwen3-14b-abliterated` with thinking genuinely disabled at the chat-template/inference level so that:
 
@@ -273,6 +307,21 @@ Determine whether LM Studio can serve `qwen3-14b-abliterated` with thinking genu
 - latency remains playable.
 
 Do not "solve" this by merely stripping reasoning text after generation unless that is the only viable route and its downsides are explicitly documented.
+
+Recommended next UX step:
+
+1. In LM Studio, unload `dolphin-2.9.3-mistral-nemo-12b`.
+2. Load `qwen3-14b-abliterated` with context `8192`.
+3. Apply the local `thinking_off` preset before serving.
+4. Set/keep the served identifier used by Aurora World as `gpt-5.6-sol`.
+5. Run a fresh Blackwater campaign through the 10-turn narrator benchmark and reject immediately if any `<think>`, `</think>`, Chinese planning text, or template wrapper reaches narrator prose.
+
+If Qwen3 14B cannot be made clean under this preset, the strongest practical next download candidate is a Mistral Small 24B Q4-class instruct model:
+
+- first choice for instruction-following baseline: `unsloth/Mistral-Small-3.2-24B-Instruct-2506-GGUF`, `Q4_K_S` or `Q4_K_M` (about 13.5-14.3 GB);
+- permissive/uncensored alternative if the baseline refuses fictional content: `Mungert/Dolphin-Mistral-24B-Venice-Edition-GGUF`, `q4_k_s` or `q4_k_m` (about 13.8-14.5 GB).
+
+The current post-cleanup 27 GiB free space is enough to download and test one 24B Q4 candidate while preserving the current Dolphin fallback and Qwen3 salvage candidate. Do not keep multiple 24B downloads unless one has already been selected.
 
 ### 4. Should structured maintenance use a different model?
 
