@@ -1,4 +1,4 @@
-const BASE = '/api'  // proxied to http://localhost:8000 via vite proxy
+const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api` || '/api'  // Vite proxies to the native Lunar backend
 
 export async function checkNeo4j() {
   try {
