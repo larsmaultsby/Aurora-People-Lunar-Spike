@@ -1451,12 +1451,15 @@ class GameSession:
                 context_window=context_window,
             )
 
+        # Stream the narrator immediately while still accumulating the complete
+        # response for Lunar's cleanup, audit, persistence, and side effects.
         full_response = ""
         async for chunk in _run(player_input, narrator_history):
             full_response += chunk
+            yield chunk
 
         # Auto-continuation: if the response was truncated mid-sentence,
-        # ask the LLM to finish instead of just trimming.
+        # ask the LLM to finish and stream that continuation immediately too.
         if full_response and not self._is_response_complete(full_response):
             continuation_prompt = (
                 "Continue the narrative EXACTLY where you stopped. "
@@ -1475,6 +1478,9 @@ class GameSession:
             ]
             async for chunk in _run(continuation_prompt, continuation_history):
                 full_response += chunk
+                yield chunk
+
+        streamed_response = full_response
 
         # Final cleanup: trim truncation and fix number spacing
         cleaned = self._clean_truncated_response(full_response)
@@ -1495,16 +1501,18 @@ class GameSession:
                 full_response, raw_player_input or player_input, world_context=audit_world_context,
             )
 
-        # Send the clean narrative to frontend (all at once)
-        yield full_response
-
-        # Process inventory tags from response
+        # Process inventory tags from the canonical response.
         clean_response = full_response
         if self._inventory:
             clean_response, inv_events = self._extract_inventory_tags(full_response)
             for inv_event in inv_events:
                 self._apply_inventory_event(inv_event)
                 yield f"[INVENTORY]{json.dumps(inv_event)}"
+
+        # If cleanup/audit/inventory-tag removal changed what the player already saw,
+        # reconcile the last assistant message using Lunar's existing control frame.
+        if clean_response != streamed_response:
+            yield f"[TRUNCATE_CLEAN]{clean_response}"
 
         # Verify NPC seed introduction: check if the NPC name appeared in the response
         self._verify_npc_seed_in_response(clean_response)

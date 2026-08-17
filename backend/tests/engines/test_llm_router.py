@@ -358,6 +358,46 @@ async def test_openai_proxy_uses_provider_specific_base_and_key():
 
 
 @pytest.mark.asyncio
+async def test_openai_proxy_stream_yields_incremental_chunks():
+    config = LLMConfig(
+        primary_provider=LLMProvider.OPENAI,
+        primary_model="gpt-5.6-sol",
+        temperature=0.85,
+        max_tokens=2000,
+    )
+    router = LLMRouter(config)
+
+    class FakeStream:
+        def __init__(self):
+            self._chunks = ["First ", "second."]
+
+        def __aiter__(self):
+            self._iter = iter(self._chunks)
+            return self
+
+        async def __anext__(self):
+            try:
+                text = next(self._iter)
+            except StopIteration:
+                raise StopAsyncIteration
+            return MagicMock(choices=[MagicMock(delta=MagicMock(content=text))])
+
+    mock_acompletion = AsyncMock(return_value=FakeStream())
+    with patch("app.engines.llm_router._OPENAI_PROXY_URL", "http://127.0.0.1:1234/v1"), \
+            patch("app.engines.llm_router._OPENAI_PROXY_KEY", "lm-studio"), \
+            patch("app.engines.llm_router.litellm.acompletion", new=mock_acompletion):
+        chunks = [chunk async for chunk in router.stream([
+            {"role": "user", "content": "Tell a story"},
+        ])]
+
+    assert chunks == ["First ", "second."]
+    call_kwargs = mock_acompletion.call_args.kwargs
+    assert call_kwargs["stream"] is True
+    assert call_kwargs["api_base"] == "http://127.0.0.1:1234/v1"
+    assert call_kwargs["api_key"] == "lm-studio"
+
+
+@pytest.mark.asyncio
 async def test_openai_without_proxy_uses_direct_provider_configuration():
     config = LLMConfig(
         primary_provider=LLMProvider.OPENAI,

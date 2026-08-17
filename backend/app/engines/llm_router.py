@@ -744,10 +744,14 @@ class LLMRouter:
         if api_base:
             call_kwargs["api_base"] = api_base
             call_kwargs["api_key"] = self._get_api_key(self.config.primary_provider)
+
+        # Anthropic proxy traffic keeps the conservative compatibility path.
+        # OpenAI-compatible proxies (notably LM Studio) intentionally fall through
+        # to the normal stream=True path below.
+        if api_base and self.config.primary_provider == LLMProvider.ANTHROPIC:
             # FASE 2: cached-form Anthropic requests go through the anthropic SDK
             # directly. litellm strips content-block cache_control, killing the cache.
-            if (self.config.primary_provider == LLMProvider.ANTHROPIC
-                    and _has_cache_control(messages)):
+            if _has_cache_control(messages):
                 t0 = time.monotonic()
                 resp = await self._complete_anthropic_sdk(
                     messages, max_tokens, model, api_base,
