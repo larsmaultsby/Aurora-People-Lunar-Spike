@@ -190,6 +190,30 @@ def test_narrator_rules_forbid_action_menu_protocol_leakage(engine):
     assert "não a saída do narrador" in prompt_pt
 
 
+def test_narrator_rules_strengthen_gm_discipline(engine):
+    prompt = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="en",
+    )
+
+    assert "NEVER assert the player's unspoken thoughts" in prompt
+    assert "named NPC" in prompt and "answer first" in prompt
+    assert "Direct questions should advance the scene with specific information" in prompt
+    assert "Mystery must come from observable evidence" in prompt
+    assert "Do not establish supernatural powers" in prompt
+    assert "Avoid repeating stock mystery phrases" in prompt
+
+    prompt_pt = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="pt-br",
+    )
+    assert "NUNCA afirme pensamentos" in prompt_pt
+    assert "NPC nomeado" in prompt_pt and "responder primeiro" in prompt_pt
+    assert "O mistério deve surgir de evidências observáveis" in prompt_pt
+
+
 def test_build_meta_prompt_is_out_of_character(engine):
     prompt = engine.build_meta_prompt(
         language="en",
