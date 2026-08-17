@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pytest
 from types import SimpleNamespace
@@ -128,7 +129,122 @@ async def test_narrative_action_logs_to_event_store(session, mock_event_store):
 async def test_narrative_action_triggers_world_tick(session, mock_world_reactor):
     async for _ in session.process_action("I travel for a month"):
         pass
+    await session.wait_for_maintenance()
     assert mock_world_reactor.process_tick.called
+
+
+@pytest.mark.asyncio
+async def test_foreground_waiter_preempts_next_maintenance_stage(session):
+    first_stage_started = asyncio.Event()
+    release_first_stage = asyncio.Event()
+    journal_started = asyncio.Event()
+
+    async def slow_witness(_response):
+        first_stage_started.set()
+        await release_first_stage.wait()
+        return []
+
+    async def mark_journal(*_args, **_kwargs):
+        journal_started.set()
+
+    session._extract_witnesses = slow_witness
+    session._async_journal = mark_journal
+    session._update_npc_minds = AsyncMock()
+    session._extract_to_graph = AsyncMock()
+    session._try_auto_crystallize = AsyncMock(return_value=None)
+    session._ingest_to_graphiti = AsyncMock()
+    session._evaluate_power_update = AsyncMock(return_value=None)
+
+    session._enqueue_post_turn_maintenance("response", "action", "player-1", "narrator-1")
+    await first_stage_started.wait()
+
+    foreground = asyncio.create_task(session._enter_foreground())
+    await asyncio.sleep(0)
+    assert not foreground.done()
+
+    release_first_stage.set()
+    await foreground
+    await asyncio.sleep(0)
+    assert not journal_started.is_set()
+
+    await session._leave_foreground()
+    await session.wait_for_maintenance()
+    assert journal_started.is_set()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_uses_captured_turn_ids_and_player_input(session):
+    session._extract_witnesses = AsyncMock(return_value=["Alice"])
+    session._async_journal = AsyncMock()
+    session._update_npc_minds = AsyncMock()
+    session._extract_to_graph = AsyncMock()
+    session._try_auto_crystallize = AsyncMock(return_value=None)
+    session._ingest_to_graphiti = AsyncMock()
+    session._evaluate_power_update = AsyncMock(return_value=None)
+    session._event_store.update_witnessed_by = MagicMock()
+
+    session._last_player_event_id = "new-player"
+    session._last_narrator_event_id = "new-narrator"
+    session._enqueue_post_turn_maintenance(
+        "old response", "old action", "old-player", "old-narrator"
+    )
+    await session.wait_for_maintenance()
+
+    session._event_store.update_witnessed_by.assert_any_call("old-player", ["Alice"])
+    session._event_store.update_witnessed_by.assert_any_call("old-narrator", ["Alice"])
+    session._evaluate_power_update.assert_awaited_once_with("old response", "old action")
+
+
+@pytest.mark.asyncio
+async def test_maintenance_worker_serializes_jobs(session):
+    active = 0
+    max_active = 0
+
+    async def measured_witness(_response):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return []
+
+    session._extract_witnesses = measured_witness
+    session._async_journal = AsyncMock()
+    session._update_npc_minds = AsyncMock()
+    session._extract_to_graph = AsyncMock()
+    session._try_auto_crystallize = AsyncMock(return_value=None)
+    session._ingest_to_graphiti = AsyncMock()
+    session._evaluate_power_update = AsyncMock(return_value=None)
+
+    session._enqueue_post_turn_maintenance("one", "action one", "p1", "n1")
+    session._enqueue_post_turn_maintenance("two", "action two", "p2", "n2")
+    await session.wait_for_maintenance()
+
+    assert max_active == 1
+    assert session._extract_witnesses is measured_witness
+
+
+@pytest.mark.asyncio
+async def test_invalidate_maintenance_cancels_inflight_job(session):
+    stage_started = asyncio.Event()
+    never_release = asyncio.Event()
+
+    async def blocked_witness(_response):
+        stage_started.set()
+        await never_release.wait()
+        return []
+
+    session._extract_witnesses = blocked_witness
+    session._enqueue_post_turn_maintenance("response", "action", "p1", "n1")
+    worker = session._maintenance_worker_task
+    await stage_started.wait()
+
+    session._invalidate_maintenance()
+
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+    assert session._maintenance_queue.empty()
+    assert session._background_step_active is False
 
 
 @pytest.mark.asyncio
@@ -254,6 +370,7 @@ async def test_process_action_ingests_to_graphiti(
 
     async for _ in session.process_action("I open the ancient door"):
         pass
+    await session.wait_for_maintenance()
 
     mock_graphiti.ingest_episode.assert_called()
     # Verify it was called with the right campaign and description
@@ -326,6 +443,7 @@ async def test_process_action_triggers_auto_plot_generation_npc():
     chunks = []
     async for chunk in session.process_action("I inspect the hallway"):
         chunks.append(chunk)
+    await session.wait_for_maintenance()
 
     auto_chunks = [chunk for chunk in chunks if chunk.startswith("[PLOT_AUTO]")]
     assert len(auto_chunks) == 1
@@ -401,8 +519,10 @@ async def test_auto_plot_respects_cooldown_between_actions():
 
     async for _ in session.process_action("first action"):
         pass
+    await session.wait_for_maintenance()
     async for _ in session.process_action("second action"):
         pass
+    await session.wait_for_maintenance()
 
     assert plot_generator.generate_npc.await_count == 1
 

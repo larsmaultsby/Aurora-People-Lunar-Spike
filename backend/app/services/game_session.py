@@ -167,6 +167,172 @@ class GameSession:
             context=f"campaign:{campaign_id}:opening",
         ) if opening_narrative else ""
 
+        # Local-model scheduling: foreground player turns always outrank
+        # post-turn maintenance.  Maintenance is serialized through one
+        # short-lived worker and yields between stages whenever a foreground
+        # turn is active or waiting.
+        self._foreground_turn_lock = asyncio.Lock()
+        self._maintenance_condition = asyncio.Condition()
+        self._foreground_active = 0
+        self._foreground_waiters = 0
+        self._background_step_active = False
+        self._maintenance_queue: asyncio.Queue[tuple[str, dict]] = asyncio.Queue()
+        self._maintenance_worker_task: asyncio.Task | None = None
+        self._maintenance_epoch = 0
+
+    async def _enter_foreground(self) -> None:
+        async with self._maintenance_condition:
+            self._foreground_waiters += 1
+            try:
+                await self._maintenance_condition.wait_for(
+                    lambda: not self._background_step_active
+                )
+                self._foreground_active += 1
+            finally:
+                self._foreground_waiters -= 1
+            logger.info("foreground turn acquired for campaign %s", self.campaign_id)
+
+    async def _leave_foreground(self) -> None:
+        async with self._maintenance_condition:
+            self._foreground_active = max(0, self._foreground_active - 1)
+            self._maintenance_condition.notify_all()
+            logger.info("foreground turn released for campaign %s", self.campaign_id)
+
+    async def _run_background_stage(self, label: str, operation):
+        """Run one maintenance stage without competing with foreground inference.
+
+        A foreground request that arrives while a stage is already running waits
+        only for that stage.  Once it is waiting, it wins the gate before the
+        maintenance worker may start another stage.
+        """
+        async with self._maintenance_condition:
+            await self._maintenance_condition.wait_for(
+                lambda: (
+                    self._foreground_active == 0
+                    and self._foreground_waiters == 0
+                    and not self._background_step_active
+                )
+            )
+            self._background_step_active = True
+        logger.info("maintenance stage starting: %s campaign=%s", label, self.campaign_id)
+        try:
+            return await operation()
+        finally:
+            async with self._maintenance_condition:
+                self._background_step_active = False
+                self._maintenance_condition.notify_all()
+            logger.info("maintenance stage completed: %s campaign=%s", label, self.campaign_id)
+
+    def _enqueue_maintenance(self, kind: str, **payload) -> None:
+        payload["epoch"] = self._maintenance_epoch
+        self._maintenance_queue.put_nowait((kind, payload))
+        logger.info(
+            "maintenance queued: %s campaign=%s depth=%d",
+            kind, self.campaign_id, self._maintenance_queue.qsize(),
+        )
+        if self._maintenance_worker_task is None or self._maintenance_worker_task.done():
+            self._maintenance_worker_task = asyncio.create_task(
+                self._maintenance_worker(),
+                name=f"lunar-maintenance:{self.campaign_id}",
+            )
+
+    def _enqueue_post_turn_maintenance(
+        self,
+        clean_response: str,
+        player_input: str,
+        player_event_id: str,
+        narrator_event_id: str,
+    ) -> None:
+        self._enqueue_maintenance(
+            "post_turn",
+            clean_response=clean_response,
+            player_input=player_input,
+            player_event_id=player_event_id,
+            narrator_event_id=narrator_event_id,
+        )
+
+    def _enqueue_world_tick(self, narrative_time: int) -> None:
+        self._enqueue_maintenance("world_tick", narrative_time=narrative_time)
+
+    async def _maintenance_worker(self) -> None:
+        logger.info("maintenance worker started for campaign %s", self.campaign_id)
+        try:
+            while True:
+                try:
+                    kind, payload = self._maintenance_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                try:
+                    if payload.get("epoch") != self._maintenance_epoch:
+                        logger.info(
+                            "maintenance skipped as stale: %s campaign=%s",
+                            kind, self.campaign_id,
+                        )
+                        continue
+                    if kind == "post_turn":
+                        await self._async_side_effects(
+                            payload["clean_response"],
+                            player_input=payload["player_input"],
+                            player_event_id=payload["player_event_id"],
+                            narrator_event_id=payload["narrator_event_id"],
+                            maintenance_epoch=payload["epoch"],
+                        )
+                    elif kind == "world_tick":
+                        await self._async_world_tick(
+                            payload["narrative_time"],
+                            maintenance_epoch=payload["epoch"],
+                        )
+                    elif kind == "journal":
+                        await self._run_background_stage(
+                            "journal",
+                            lambda: self._async_journal(payload["clean_response"]),
+                        )
+                except Exception:
+                    logger.error(
+                        "maintenance job failed: %s campaign=%s",
+                        kind, self.campaign_id, exc_info=True,
+                    )
+                finally:
+                    self._maintenance_queue.task_done()
+        finally:
+            self._maintenance_worker_task = None
+            logger.info("maintenance worker stopped for campaign %s", self.campaign_id)
+            # No await occurs between the empty check above and clearing the task,
+            # but a defensive restart keeps the queue live if a future refactor
+            # introduces an interleaving point.
+            if not self._maintenance_queue.empty():
+                self._maintenance_worker_task = asyncio.create_task(
+                    self._maintenance_worker(),
+                    name=f"lunar-maintenance:{self.campaign_id}",
+                )
+
+    async def wait_for_maintenance(self) -> None:
+        """Wait until queued maintenance has drained (tests/controlled shutdowns)."""
+        while True:
+            await self._maintenance_queue.join()
+            task = self._maintenance_worker_task
+            if task is not None and not task.done():
+                await asyncio.shield(task)
+            if self._maintenance_queue.empty() and (
+                self._maintenance_worker_task is None
+                or self._maintenance_worker_task.done()
+            ):
+                return
+
+    def _invalidate_maintenance(self) -> None:
+        """Invalidate queued/in-flight work after rewind so deleted turns stay deleted."""
+        self._maintenance_epoch += 1
+        task = self._maintenance_worker_task
+        if task is not None and not task.done():
+            task.cancel()
+        while True:
+            try:
+                self._maintenance_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                self._maintenance_queue.task_done()
+
     def _rebuild_history_from_events(self) -> None:
         """Rebuild _history from persisted events so the AI retains context."""
         player_events = self._event_store.get_by_type(
@@ -338,6 +504,9 @@ class GameSession:
         and memory crystals from the remaining events so that the game
         state is fully consistent.
         """
+        # Deferred work from a deleted turn must never mutate rebuilt state.
+        self._invalidate_maintenance()
+
         # Reset all in-memory state
         self._history.clear()
         self._turn_count = 0
@@ -1106,6 +1275,16 @@ class GameSession:
             )
 
     async def process_action(self, player_input: str, max_tokens: int = 2000) -> AsyncIterator[str]:
+        """Run one player turn with priority over post-turn maintenance."""
+        async with self._foreground_turn_lock:
+            await self._enter_foreground()
+            try:
+                async for chunk in self._process_action_foreground(player_input, max_tokens):
+                    yield chunk
+            finally:
+                await self._leave_foreground()
+
+    async def _process_action_foreground(self, player_input: str, max_tokens: int = 2000) -> AsyncIterator[str]:
         self._max_tokens = max_tokens
 
         # Ensure player power is evaluated with full context (runs once per campaign)
@@ -1168,9 +1347,9 @@ class GameSession:
             async for chunk in self._handle_narrative(player_input, mode):
                 yield chunk
 
-        # World reactor and auto-plot run async (fire-and-forget)
+        # World reactor and auto-plot are queued behind foreground narration.
         if mode != NarrativeMode.META:
-            asyncio.create_task(self._async_world_tick(narrative_time))
+            self._enqueue_world_tick(narrative_time)
 
     def _resolve_canonical_name(self, short_name: str, all_names: list[str]) -> str:
         """Resolve a potentially short name to its full canonical form.
@@ -1530,13 +1709,17 @@ class GameSession:
         )
         self._last_narrator_event_id = narrator_event.id
 
-        # Fire side-effects async (non-blocking) — journal, NPC minds, graph,
-        # crystallization, power update all run after the narrative is sent.
+        # Queue side effects behind foreground narration. Capture turn-specific
+        # identifiers now so deferred work cannot accidentally mutate a later turn.
         if mode != NarrativeMode.META and clean_response:
-            asyncio.create_task(self._async_side_effects(clean_response))
+            self._enqueue_post_turn_maintenance(
+                clean_response=clean_response,
+                player_input=raw_player_input or player_input,
+                player_event_id=self._last_player_event_id,
+                narrator_event_id=narrator_event.id,
+            )
         else:
-            # META mode: only journal (lightweight)
-            asyncio.create_task(self._async_journal(clean_response))
+            self._enqueue_maintenance("journal", clean_response=clean_response)
 
     async def _process_action_single_call(self, player_input: str, max_tokens: int) -> AsyncIterator[str]:
         """Single LLM call mode for Anthropic: narrative + mode + NPCs + entities in one request."""
@@ -2089,14 +2272,25 @@ class GameSession:
             logger.warning("Witness extraction failed", exc_info=True)
             return []
 
-    def _apply_witnesses_to_recent_turn(self, witnesses: list[str]) -> None:
-        """Stamp the just-appended PLAYER_ACTION + NARRATOR_RESPONSE rows
-        with the witness list so downstream consumers (journal,
-        crystallization, perspective filter) read the right value.
+    def _apply_witnesses_to_recent_turn(
+        self,
+        witnesses: list[str],
+        player_event_id: str | None = None,
+        narrator_event_id: str | None = None,
+    ) -> None:
+        """Stamp a specific turn's PLAYER_ACTION + NARRATOR_RESPONSE rows.
+
+        Deferred maintenance passes captured IDs so a later foreground turn
+        cannot redirect witness updates onto the wrong events.  The optional
+        fallback preserves legacy/direct callers.
         """
         if not witnesses:
             return
-        for event_id in (self._last_player_event_id, self._last_narrator_event_id):
+        if player_event_id is None:
+            player_event_id = self._last_player_event_id
+        if narrator_event_id is None:
+            narrator_event_id = self._last_narrator_event_id
+        for event_id in (player_event_id, narrator_event_id):
             if not event_id:
                 continue
             try:
@@ -2107,62 +2301,106 @@ class GameSession:
                     exc_info=True,
                 )
 
-    async def _async_side_effects(self, clean_response: str) -> None:
-        """Fire-and-forget side effects that run after the narrative is sent to the player.
+    def _maintenance_is_current(self, maintenance_epoch: int | None) -> bool:
+        return maintenance_epoch is None or maintenance_epoch == self._maintenance_epoch
 
-        These are important for game state but don't need to block the SSE response.
-        Any errors are logged but never surface to the player.
-        """
+    async def _async_side_effects(
+        self,
+        clean_response: str,
+        *,
+        player_input: str = "",
+        player_event_id: str | None = None,
+        narrator_event_id: str | None = None,
+        maintenance_epoch: int | None = None,
+    ) -> None:
+        """Run post-turn maintenance in foreground-aware serialized stages."""
         try:
             logger.info("_async_side_effects: starting (response %d chars)", len(clean_response))
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # Camada 3 — perspective filter. Run FIRST so every downstream
-            # side-effect (journal, NPC mind update, crystallization) sees
-            # the witnessed_by stamp on this turn's PLAYER_ACTION /
-            # NARRATOR_RESPONSE events.
-            witnesses = await self._extract_witnesses(clean_response)
-            self._apply_witnesses_to_recent_turn(witnesses)
+            witnesses = await self._run_background_stage(
+                "witness_extraction",
+                lambda: self._extract_witnesses(clean_response),
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
+            self._apply_witnesses_to_recent_turn(
+                witnesses,
+                player_event_id=player_event_id,
+                narrator_event_id=narrator_event_id,
+            )
 
-            # Journal evaluation (lightweight LLM call)
-            await self._async_journal(clean_response, witnessed_by=witnesses)
+            await self._run_background_stage(
+                "journal",
+                lambda: self._async_journal(clean_response, witnessed_by=witnesses),
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # NPC mind updates — restricted to NPCs actually present in scene.
-            await self._update_npc_minds(clean_response, npcs_present=witnesses)
+            await self._run_background_stage(
+                "npc_minds",
+                lambda: self._update_npc_minds(clean_response, npcs_present=witnesses),
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # Graph entity extraction
-            await self._extract_to_graph(clean_response)
+            await self._run_background_stage(
+                "entity_extraction",
+                lambda: self._extract_to_graph(clean_response),
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # Memory crystallization (may cascade to higher tiers).
-            # Runs after witness stamping so source events carry the right
-            # witnessed_by — the consolidation step takes the union.
-            await self._try_auto_crystallize()
+            await self._run_background_stage(
+                "crystallization",
+                self._try_auto_crystallize,
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # Graphiti ingestion
-            await self._ingest_to_graphiti(clean_response, "narrator_response")
+            await self._run_background_stage(
+                "graphiti_ingestion",
+                lambda: self._ingest_to_graphiti(clean_response, "narrator_response"),
+            )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
 
-            # Power level evaluation
-            last_player_input = ""
-            if len(self._history) >= 2:
-                last_player_input = self._history[-2].get("content", "")
-            await self._evaluate_power_update(clean_response, last_player_input)
+            await self._run_background_stage(
+                "power_evaluation",
+                lambda: self._evaluate_power_update(clean_response, player_input),
+            )
 
             logger.info("_async_side_effects: completed")
         except Exception:
             logger.error("_async_side_effects failed", exc_info=True)
 
-    async def _async_world_tick(self, narrative_time: int) -> None:
-        """Fire-and-forget world reactor tick + auto-plot generation."""
+    async def _async_world_tick(
+        self,
+        narrative_time: int,
+        *,
+        maintenance_epoch: int | None = None,
+    ) -> None:
+        """Run world reactor and auto-plot as separate foreground-aware stages."""
         try:
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
             if self._graphiti:
                 world_ctx = await self._memory.build_context_window_async(self.campaign_id)
             else:
                 world_ctx = self._memory.build_context_window(self.campaign_id)
-            world_changes = await self._world_reactor.process_tick(
-                campaign_id=self.campaign_id,
-                narrative_seconds=narrative_time,
-                world_context=world_ctx,
-                language=self.language,
+
+            world_changes = await self._run_background_stage(
+                "world_tick",
+                lambda: self._world_reactor.process_tick(
+                    campaign_id=self.campaign_id,
+                    narrative_seconds=narrative_time,
+                    world_context=world_ctx,
+                    language=self.language,
+                ),
             )
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
             if world_changes:
                 self._event_store.append(
                     campaign_id=self.campaign_id,
@@ -2172,11 +2410,19 @@ class GameSession:
                     location="world",
                     entities=[],
                 )
-                await self._ingest_to_graphiti(world_changes, "world_tick")
+                await self._run_background_stage(
+                    "world_tick_graphiti",
+                    lambda: self._ingest_to_graphiti(world_changes, "world_tick"),
+                )
 
-            # Auto-plot (still uses yields internally but we consume them here)
-            async for _ in self._maybe_trigger_auto_plot(world_ctx):
-                pass  # Plot events are persisted in _maybe_trigger_auto_plot
+            if not self._maintenance_is_current(maintenance_epoch):
+                return
+
+            async def _consume_auto_plot() -> None:
+                async for _ in self._maybe_trigger_auto_plot(world_ctx):
+                    pass  # Plot events are persisted in _maybe_trigger_auto_plot
+
+            await self._run_background_stage("auto_plot", _consume_auto_plot)
         except Exception:
             logger.error("_async_world_tick failed", exc_info=True)
 
