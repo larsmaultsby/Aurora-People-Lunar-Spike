@@ -62,6 +62,30 @@ def apply_model_policy(provider: LLMProvider, model: str) -> None:
     _llm.config.orchestrator_model = narrative_model
 
 
+def resolve_model_policy(provider: LLMProvider, model: str) -> tuple[LLMProvider, str]:
+    """Apply optional runtime provider/model forcing for managed local deployments.
+
+    Normal Lunar behavior remains request-driven when the environment variables
+    are unset. Aurora World uses these only to prevent stale browser settings from
+    accidentally routing a local-only runtime back to cloud providers.
+    """
+    effective_provider = provider
+    forced_provider = os.environ.get("LUNAR_FORCE_PROVIDER", "").strip().lower()
+    if forced_provider:
+        try:
+            effective_provider = LLMProvider(forced_provider)
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid LUNAR_FORCE_PROVIDER=%r; using requested provider %s",
+                forced_provider,
+                provider.value,
+            )
+
+    forced_model = os.environ.get("LUNAR_FORCE_MODEL", "").strip()
+    effective_model = forced_model or model
+    return effective_provider, effective_model
+
+
 _narrator = NarratorEngine(llm=_llm)
 _memory = MemoryEngine(event_store=_event_store, llm=_llm)
 _world_reactor = WorldReactor(llm=_llm)
@@ -183,6 +207,8 @@ _graphiti_engine = None
 
 def _get_graphiti_engine():
     global _graphiti_engine
+    if os.environ.get("LUNAR_DISABLE_GRAPHITI", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return None
     if _graphiti_engine is not None:
         return _graphiti_engine
     try:
@@ -345,7 +371,8 @@ async def player_action(req: PlayerActionRequest):
         provider = LLMProvider(req.provider)
     except ValueError:
         provider = _llm.config.primary_provider
-    apply_model_policy(provider, req.model)
+    provider, model = resolve_model_policy(provider, req.model)
+    apply_model_policy(provider, model)
     _llm.config.temperature = req.temperature
     _llm.config.max_tokens = req.max_tokens
     if req.combat_enabled is not None:

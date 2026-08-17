@@ -12,6 +12,39 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
+def test_runtime_model_policy_can_force_local_provider(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_FORCE_PROVIDER", "openai")
+    monkeypatch.setenv("LUNAR_FORCE_MODEL", "gpt-5.6-sol")
+    provider, model = routes_game.resolve_model_policy(
+        routes_game.LLMProvider.DEEPSEEK,
+        "deepseek-v4-flash",
+    )
+    assert provider == routes_game.LLMProvider.OPENAI
+    assert model == "gpt-5.6-sol"
+
+
+def test_runtime_model_policy_ignores_invalid_forced_provider(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_FORCE_PROVIDER", "not-a-provider")
+    provider, model = routes_game.resolve_model_policy(
+        routes_game.LLMProvider.DEEPSEEK,
+        "deepseek-v4-flash",
+    )
+    assert provider == routes_game.LLMProvider.DEEPSEEK
+    assert model == "deepseek-v4-flash"
+
+
+def test_graphiti_can_be_disabled_for_local_runtime(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_DISABLE_GRAPHITI", "1")
+    monkeypatch.setattr(routes_game, "_graphiti_engine", None)
+    assert routes_game._get_graphiti_engine() is None
+
+
 def test_get_settings(client):
     r = client.get("/api/settings")
     assert r.status_code == 200
@@ -20,6 +53,18 @@ def test_get_settings(client):
     assert "model" in data
     assert "temperature" in data
     assert "max_tokens" in data
+
+
+def test_update_settings_respects_runtime_model_forcing(client, monkeypatch):
+    monkeypatch.setenv("LUNAR_FORCE_PROVIDER", "openai")
+    monkeypatch.setenv("LUNAR_FORCE_MODEL", "gpt-5.6-sol")
+    r = client.post("/api/settings", json={
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+    })
+    assert r.status_code == 200
+    assert r.json()["provider"] == "openai"
+    assert r.json()["model"] == "gpt-5.6-sol"
 
 
 def test_update_settings(client):
