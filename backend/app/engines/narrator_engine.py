@@ -39,6 +39,16 @@ class NarratorEngine:
         self._llm = llm
 
     async def detect_mode(self, player_input: str, story_context: str = "") -> tuple[NarrativeMode, dict]:
+        deterministic = self._detect_protocol_mode(player_input)
+        if deterministic is not None:
+            mode, meta = deterministic
+            logger.info(
+                "detect_mode: deterministic protocol classification mode=%s input_prefix=%s",
+                mode.value,
+                player_input.strip()[:24],
+            )
+            return mode, meta
+
         context_hint = ""
         if story_context:
             context_hint = f" Recent story context: {story_context}"
@@ -727,6 +737,36 @@ class NarratorEngine:
             "entities": [],
             "relationships": [],
             "world_changes": "",
+        }
+
+    @staticmethod
+    def _detect_protocol_mode(player_input: str) -> tuple[NarrativeMode, dict] | None:
+        """Classify explicit frontend protocol actions without inference.
+
+        CONTINUE and SAY are always narrative actions. META is explicitly
+        out-of-character. DO can still represent combat or a long time skip,
+        so it reuses the existing local heuristic on the action body.
+        Untagged/freeform input returns None and keeps the LLM classifier path.
+        """
+        stripped = player_input.strip()
+        match = re.match(r"^\[(CONTINUE|SAY|DO|META)\](?:\s+|$)(.*)$", stripped, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+
+        action_type = match.group(1).upper()
+        body = match.group(2).strip()
+
+        if action_type == "DO":
+            return NarratorEngine._heuristic_detect_mode(body)
+
+        mode = NarrativeMode.META if action_type == "META" else NarrativeMode.NARRATIVE
+        seconds = 0 if mode == NarrativeMode.META else 60
+        return mode, {
+            "mode": mode.value,
+            "ambush": False,
+            "narrative_time_seconds": seconds,
+            "opponent_name": "",
+            "opponent_power": 3,
         }
 
     @staticmethod

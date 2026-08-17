@@ -14,6 +14,57 @@ def engine(mock_llm):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("player_input", "expected_mode", "expected_seconds"),
+    [
+        ("[CONTINUE]", NarrativeMode.NARRATIVE, 60),
+        ("[SAY] Tell me what happened.", NarrativeMode.NARRATIVE, 60),
+        ("[META] Make the prose shorter.", NarrativeMode.META, 0),
+    ],
+)
+async def test_explicit_protocol_modes_bypass_llm(
+    engine, mock_llm, player_input, expected_mode, expected_seconds
+):
+    mode, meta = await engine.detect_mode(player_input)
+
+    assert mode == expected_mode
+    assert meta["mode"] == expected_mode.value
+    assert meta["narrative_time_seconds"] == expected_seconds
+    mock_llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_do_protocol_uses_local_combat_heuristic_without_llm(engine, mock_llm):
+    mode, meta = await engine.detect_mode("[DO] I attack the guard with my sword")
+
+    assert mode == NarrativeMode.COMBAT
+    assert meta["mode"] == "COMBAT"
+    mock_llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_do_protocol_uses_local_duration_heuristic_without_llm(engine, mock_llm):
+    mode, meta = await engine.detect_mode("[DO] I wait here for 2 hours")
+
+    assert mode == NarrativeMode.NARRATIVE
+    assert meta["narrative_time_seconds"] == 7200
+    mock_llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_untagged_action_still_uses_llm_classifier(engine, mock_llm):
+    mock_llm.complete = AsyncMock(
+        return_value='{"mode": "NARRATIVE", "ambush": false, "narrative_time_seconds": 30}'
+    )
+
+    mode, meta = await engine.detect_mode("I look through the window")
+
+    assert mode == NarrativeMode.NARRATIVE
+    assert meta["narrative_time_seconds"] == 30
+    mock_llm.complete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_detect_combat_mode(engine, mock_llm):
     mock_llm.complete = AsyncMock(
         return_value='{"mode": "COMBAT", "ambush": false, "narrative_time_seconds": 0}'
