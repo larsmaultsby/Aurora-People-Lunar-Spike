@@ -42,11 +42,19 @@ if not os.environ.get("OPENAI_API_KEY") and settings.openai_api_key:
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _event_store = EventStore(os.environ.get("EVENT_DB_PATH", os.path.join(_BACKEND_DIR, "events.db")))
 _trace_store = TraceStore(os.environ.get("LLM_TRACE_DB_PATH", os.path.join(_BACKEND_DIR, "traces.db")))
-_llm = LLMRouter(LLMConfig())
+
+# Aurora World defaults to the OpenAI-compatible local LM Studio route. The
+# managed runtime also forces these values server-side so stale clients cannot
+# redirect gameplay to a cloud provider.
+_OPENAI_MODEL = "gpt-5.6-sol"
+_llm = LLMRouter(LLMConfig(
+    primary_provider=LLMProvider.OPENAI,
+    primary_model=_OPENAI_MODEL,
+    orchestrator_model=_OPENAI_MODEL,
+))
 
 # Secondary calls (audit, memory, journal, combat, NPCs, plot, opening) run on a
-# cheaper model than the narrative call.
-_OPENAI_MODEL = "gpt-5.6-sol"
+# cheaper model than the narrative call where a provider has one.
 _AUXILIARY_MODELS = {
     LLMProvider.ANTHROPIC: "claude-sonnet-5",
     LLMProvider.DEEPSEEK: "deepseek-v4-flash",
@@ -293,15 +301,15 @@ class PlayerActionRequest(BaseModel):
     action: str = Field(..., min_length=1, max_length=20000)
     opening_narrative: str = Field(default="", max_length=50000)
     max_tokens: int = Field(default=2000, ge=256, le=8192)
-    provider: str = Field(default="deepseek", max_length=20)
-    model: str = Field(default="deepseek-v4-flash", max_length=64)
+    provider: str = Field(default="openai", max_length=20)
+    model: str = Field(default="gpt-5.6-sol", max_length=64)
     temperature: float = Field(default=0.85, ge=0.0, le=2.0)
     combat_enabled: bool | None = None
 
 
 class SettingsRequest(BaseModel):
-    provider: str = "deepseek"
-    model: str = "deepseek-v4-flash"
+    provider: str = "openai"
+    model: str = "gpt-5.6-sol"
     temperature: float = 0.85
     max_tokens: int = 2000
 

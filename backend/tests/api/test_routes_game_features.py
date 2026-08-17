@@ -45,12 +45,25 @@ def test_graphiti_can_be_disabled_for_local_runtime(monkeypatch):
     assert routes_game._get_graphiti_engine() is None
 
 
+def test_request_defaults_use_local_sol_route():
+    from app.api.routes_game import PlayerActionRequest
+    from app.main import SettingsUpdateRequest
+
+    action = PlayerActionRequest(campaign_id="campaign", action="[CONTINUE]")
+    settings = SettingsUpdateRequest()
+    assert action.provider == "openai"
+    assert action.model == "gpt-5.6-sol"
+    assert settings.provider == "openai"
+    assert settings.model == "gpt-5.6-sol"
+
+
 def test_get_settings(client):
     r = client.get("/api/settings")
     assert r.status_code == 200
     data = r.json()
-    assert "provider" in data
-    assert "model" in data
+    assert data["provider"] == "openai"
+    assert data["model"] == "gpt-5.6-sol"
+    assert data["auxiliary_model"] == "gpt-5.6-sol"
     assert "temperature" in data
     assert "max_tokens" in data
 
@@ -92,7 +105,7 @@ def test_update_settings_invalid_provider_falls_back(client):
         "model": "some-model",
     })
     assert r.status_code == 200
-    assert r.json()["provider"] == "deepseek"
+    assert r.json()["provider"] == "openai"
 
 
 def test_update_settings_anthropic_splits_narrative_and_auxiliary_model(client):

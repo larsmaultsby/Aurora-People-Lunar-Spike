@@ -53,8 +53,8 @@ async def health_neo4j():
 
 
 class SettingsUpdateRequest(BaseModel):
-    provider: str = "deepseek"
-    model: str = "deepseek-v4-flash"
+    provider: str = "openai"
+    model: str = "gpt-5.6-sol"
     temperature: float = 0.85
     max_tokens: int = 2000
 
@@ -64,7 +64,7 @@ def update_settings(req: SettingsUpdateRequest):
     try:
         provider = LLMProvider(req.provider)
     except ValueError:
-        provider = LLMProvider.DEEPSEEK
+        provider = LLMProvider.OPENAI
     provider, model = resolve_model_policy(provider, req.model)
     _llm.config.temperature = req.temperature
     _llm.config.max_tokens = req.max_tokens

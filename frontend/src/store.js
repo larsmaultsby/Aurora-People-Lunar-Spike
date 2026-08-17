@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 
-const OPENAI_MODEL = 'gpt-5.6-sol'
+const LOCAL_PROVIDER = 'openai'
+const LOCAL_MODEL = 'gpt-5.6-sol'
 
-const normalizeSettings = (settings) => (
-  settings?.llmProvider === 'openai'
-    ? { ...settings, llmModel: OPENAI_MODEL }
-    : settings
-)
+const normalizeSettings = (settings = {}) => ({
+  ...settings,
+  llmProvider: LOCAL_PROVIDER,
+  llmModel: LOCAL_MODEL,
+})
 
 export const useGameStore = create((set) => ({
   // Scenario state
@@ -31,8 +32,8 @@ export const useGameStore = create((set) => ({
   inventory: [],
 
   // Settings
-  llmProvider: 'deepseek',
-  llmModel: 'deepseek-v4-flash',
+  llmProvider: LOCAL_PROVIDER,
+  llmModel: LOCAL_MODEL,
   temperature: 0.85,
   maxTokens: 2000,
   combatEnabled: true,
