@@ -157,6 +157,25 @@ def test_narrator_rules_limit_complexity_and_stylized_dialogue(engine):
     assert "não transforme uma atividade comum em conspiração" in prompt
 
 
+def test_narrator_prompt_uses_generic_character_tag_format_without_sample_names(engine):
+    prompt_en = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="en",
+    )
+    prompt_pt = engine.build_system_prompt(
+        tone_instructions="",
+        memory_context="",
+        language="pt-br",
+    )
+
+    assert "literal @ character" in prompt_en
+    assert "caractere literal @" in prompt_pt
+    for contaminated_name in ("Satoru Gojo", "Yuji", "Kael Noir"):
+        assert contaminated_name not in prompt_en
+        assert contaminated_name not in prompt_pt
+
+
 def test_narrator_rules_bound_new_npc_knowledge(engine):
     prompt = engine.build_system_prompt(
         tone_instructions="",

@@ -271,6 +271,23 @@ async def test_npc_knowledge_block_injected_into_prompt():
 
 
 @pytest.mark.asyncio
+async def test_npc_mind_prompt_has_no_reusable_sample_character_names():
+    response = json.dumps({"npcs": []})
+    llm = _RecordingLLM(response)
+    engine = NpcMindEngine(llm=llm)
+    await engine.update_npc_thoughts(
+        campaign_id="c1",
+        narrative_text="A named passenger watches the aisle.",
+        world_context="ctx",
+    )
+
+    assert "proper names that already appear in the narrative" in llm.last_system_content
+    assert "Do not invent a name" in llm.last_system_content
+    for contaminated_name in ("Satoru Gojo", "Yuji"):
+        assert contaminated_name not in llm.last_system_content
+
+
+@pytest.mark.asyncio
 async def test_scene_presence_constraint_appears_in_system_prompt():
     """The system prompt explicitly lists which NPCs the LLM can write about."""
     response = json.dumps({"npcs": [{"name": "Rin", "thoughts": {"feeling": "calm"}}]})
