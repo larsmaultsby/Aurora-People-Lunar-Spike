@@ -797,10 +797,10 @@ class NarratorEngine:
     @staticmethod
     def _extract_narrative_seconds(text: str) -> int:
         patterns = [
-            (r"(\\d+)\\s*(day|days|dia|dias)", 86400),
-            (r"(\\d+)\\s*(hour|hours|hora|horas)", 3600),
-            (r"(\\d+)\\s*(minute|minutes|minuto|minutos)", 60),
-            (r"(\\d+)\\s*(week|weeks|semana|semanas)", 604800),
+            (r"(\d+)\s*(day|days|dia|dias)", 86400),
+            (r"(\d+)\s*(hour|hours|hora|horas)", 3600),
+            (r"(\d+)\s*(minute|minutes|minuto|minutos)", 60),
+            (r"(\d+)\s*(week|weeks|semana|semanas)", 604800),
         ]
         for pattern, multiplier in patterns:
             match = re.search(pattern, text)
