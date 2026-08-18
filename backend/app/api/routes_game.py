@@ -64,17 +64,31 @@ _AUXILIARY_MODELS = {
 }
 
 
+def _resolve_narrative_model(provider: LLMProvider, requested_model: str) -> str:
+    """Resolve the internal model target while preserving Aurora's public Sol label."""
+    if provider == LLMProvider.OPENAI:
+        local_narrator = os.environ.get("LUNAR_NARRATOR_MODEL", "").strip()
+        if local_narrator:
+            return local_narrator
+        return _OPENAI_MODEL
+    return requested_model
+
+
 def _resolve_auxiliary_model(provider: LLMProvider, narrative_model: str) -> str:
     if provider == LLMProvider.OPENAI:
         local_aux = os.environ.get("LUNAR_AUX_MODEL", "").strip()
-        if local_aux:
-            return local_aux
+        return local_aux or narrative_model
     return _AUXILIARY_MODELS.get(provider, narrative_model)
 
 
+def public_model_label(provider: LLMProvider, routed_model: str) -> str:
+    """Return the stable client-facing model label for the active provider."""
+    return _OPENAI_MODEL if provider == LLMProvider.OPENAI else routed_model
+
+
 def apply_model_policy(provider: LLMProvider, model: str) -> None:
-    """Keep narration on `model`; route mechanical calls through the auxiliary path."""
-    narrative_model = _OPENAI_MODEL if provider == LLMProvider.OPENAI else model
+    """Route narration and mechanical work independently behind a stable public label."""
+    narrative_model = _resolve_narrative_model(provider, model)
     _llm.config.primary_provider = provider
     _llm.config.primary_model = _resolve_auxiliary_model(provider, narrative_model)
     _llm.config.orchestrator_model = narrative_model

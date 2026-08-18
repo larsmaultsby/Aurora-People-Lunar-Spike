@@ -57,37 +57,68 @@ def test_request_defaults_use_local_sol_route():
     assert settings.model == "gpt-5.6-sol"
 
 
-def test_openai_auxiliary_model_can_be_overridden_for_local_worker(monkeypatch):
+def test_openai_narrator_and_auxiliary_models_can_be_routed_independently(monkeypatch):
     from app.api import routes_game
 
+    monkeypatch.setenv("LUNAR_NARRATOR_MODEL", "local-narrator")
     monkeypatch.setenv("LUNAR_AUX_MODEL", "small-structured-worker")
     routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
     try:
-        assert routes_game._llm.config.orchestrator_model == "gpt-5.6-sol"
+        assert routes_game._llm.config.orchestrator_model == "local-narrator"
         assert routes_game._llm.config.primary_model == "small-structured-worker"
+        assert routes_game.public_model_label(
+            routes_game.LLMProvider.OPENAI,
+            routes_game._llm.config.orchestrator_model,
+        ) == "gpt-5.6-sol"
     finally:
+        monkeypatch.delenv("LUNAR_NARRATOR_MODEL", raising=False)
         monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
         routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
 
 
-def test_openai_auxiliary_model_defaults_to_sol_when_unset(monkeypatch):
+def test_openai_auxiliary_model_falls_back_to_resolved_narrator(monkeypatch):
     from app.api import routes_game
 
+    monkeypatch.setenv("LUNAR_NARRATOR_MODEL", "local-narrator")
+    monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
+    routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+    try:
+        assert routes_game._llm.config.orchestrator_model == "local-narrator"
+        assert routes_game._llm.config.primary_model == "local-narrator"
+    finally:
+        monkeypatch.delenv("LUNAR_NARRATOR_MODEL", raising=False)
+        routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+
+
+def test_openai_defaults_to_sol_target_when_local_overrides_unset(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.delenv("LUNAR_NARRATOR_MODEL", raising=False)
     monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
     routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
     assert routes_game._llm.config.orchestrator_model == "gpt-5.6-sol"
     assert routes_game._llm.config.primary_model == "gpt-5.6-sol"
 
 
-def test_get_settings(client):
-    r = client.get("/api/settings")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["provider"] == "openai"
-    assert data["model"] == "gpt-5.6-sol"
-    assert data["auxiliary_model"] == "gpt-5.6-sol"
-    assert "temperature" in data
-    assert "max_tokens" in data
+def test_get_settings_keeps_sol_public_label_with_local_targets(client, monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_NARRATOR_MODEL", "local-narrator")
+    monkeypatch.setenv("LUNAR_AUX_MODEL", "small-structured-worker")
+    routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+    try:
+        r = client.get("/api/settings")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["provider"] == "openai"
+        assert data["model"] == "gpt-5.6-sol"
+        assert data["auxiliary_model"] == "small-structured-worker"
+        assert "temperature" in data
+        assert "max_tokens" in data
+    finally:
+        monkeypatch.delenv("LUNAR_NARRATOR_MODEL", raising=False)
+        monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
+        routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
 
 
 def test_update_settings_respects_runtime_model_forcing(client, monkeypatch):

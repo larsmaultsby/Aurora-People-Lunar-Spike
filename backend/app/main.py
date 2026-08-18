@@ -11,7 +11,13 @@ if settings.debug:
 else:
     logging.basicConfig(level=logging.INFO)
 from app.api.routes_scenarios import router as scenarios_router
-from app.api.routes_game import router as game_router, _llm, apply_model_policy, resolve_model_policy
+from app.api.routes_game import (
+    router as game_router,
+    _llm,
+    apply_model_policy,
+    public_model_label,
+    resolve_model_policy,
+)
 from app.engines.llm_router import LLMProvider
 
 app = FastAPI(title="Project Lunar", version="0.1.0")
@@ -70,14 +76,20 @@ def update_settings(req: SettingsUpdateRequest):
     _llm.config.max_tokens = req.max_tokens
     apply_model_policy(provider, model)
     effective_model = _llm.config.orchestrator_model or _llm.config.primary_model
-    return {"status": "ok", "provider": provider.value, "model": effective_model}
+    return {
+        "status": "ok",
+        "provider": provider.value,
+        "model": public_model_label(provider, effective_model),
+    }
 
 
 @app.get("/api/settings")
 def get_settings():
+    provider = _llm.config.primary_provider
+    routed_model = _llm.config.orchestrator_model or _llm.config.primary_model
     return {
-        "provider": _llm.config.primary_provider.value,
-        "model": _llm.config.orchestrator_model or _llm.config.primary_model,
+        "provider": provider.value,
+        "model": public_model_label(provider, routed_model),
         "auxiliary_model": _llm.config.primary_model,
         "temperature": _llm.config.temperature,
         "max_tokens": _llm.config.max_tokens,
