@@ -45,6 +45,18 @@ async def test_complete_returns_text(router):
 
 
 @pytest.mark.asyncio
+async def test_complete_logs_resolved_model(router, caplog):
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content="ok"), finish_reason="stop")]
+    mock_response.usage = MagicMock(prompt_tokens=8, completion_tokens=2)
+    with patch("app.engines.llm_router.litellm.acompletion", new=AsyncMock(return_value=mock_response)):
+        with caplog.at_level("WARNING"):
+            await router.complete(messages=[{"role": "user", "content": "test"}])
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("model=deepseek/deepseek-v4-flash" in message for message in messages)
+
+
+@pytest.mark.asyncio
 async def test_complete_uses_fallback_on_error(router):
     router.config.fallback_provider = LLMProvider.OPENAI
     router.config.fallback_model = "gpt-5.6-sol"

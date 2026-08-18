@@ -293,8 +293,8 @@ def _log_call(caller: str, messages: list[dict], max_tokens: int, response, elap
         entry["output"] = response_text
     _call_log.append(entry)
     logger.warning(
-        "🔥 LLM CALL [%s] input=%d output=%d cache_r=%d cache_w=%d max=%d time=%.1fs msgs=%d sys_chars=%d",
-        caller, input_tokens, output_tokens, cache_read, cache_creation, max_tokens, elapsed,
+        "🔥 LLM CALL [%s] model=%s input=%d output=%d cache_r=%d cache_w=%d max=%d time=%.1fs msgs=%d sys_chars=%d",
+        caller, model, input_tokens, output_tokens, cache_read, cache_creation, max_tokens, elapsed,
         len(messages), system_chars,
     )
     if not response_text.strip():
@@ -839,8 +839,8 @@ class LLMRouter:
             entry["output"] = accumulated
         _call_log.append(entry)
         logger.warning(
-            "🔥 LLM CALL [%s] input≈%d output≈%d max=%d time=%.1fs msgs=%d sys_chars=%d",
-            entry["caller"], entry["input_tokens"], entry["output_tokens"],
+            "🔥 LLM CALL [%s] model=%s input≈%d output≈%d max=%d time=%.1fs msgs=%d sys_chars=%d",
+            entry["caller"], model, entry["input_tokens"], entry["output_tokens"],
             max_tokens, entry["elapsed_s"], len(messages), system_chars,
         )
         if not accumulated.strip():
