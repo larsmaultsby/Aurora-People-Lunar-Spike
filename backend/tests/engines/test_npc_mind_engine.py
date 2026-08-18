@@ -104,12 +104,12 @@ async def test_handles_invalid_json():
 async def test_parses_fenced_json():
     engine = NpcMindEngine(
         llm=FakeLLM(
-            '```json\n{"npcs":[{"name":"Guard","thoughts":{"feeling":"tense","goal":"hold the line"}}]}\n```'
+            '```json\n{"npcs":[{"name":"Mara Voss","thoughts":{"feeling":"tense","goal":"hold the line"}}]}\n```'
         )
     )
-    updated = await engine.update_npc_thoughts("c1", "text", "ctx")
+    updated = await engine.update_npc_thoughts("c1", "Mara Voss braces at the door.", "ctx")
     assert len(updated) == 1
-    assert updated[0].name == "Guard"
+    assert updated[0].name == "Mara Voss"
     assert updated[0].get_thought("goal") == "hold the line"
 
 
