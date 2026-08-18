@@ -53,8 +53,10 @@ _llm = LLMRouter(LLMConfig(
     orchestrator_model=_OPENAI_MODEL,
 ))
 
-# Secondary calls (audit, memory, journal, combat, NPCs, plot, opening) run on a
-# cheaper model than the narrative call where a provider has one.
+# Secondary calls (memory, journal, combat checks, extraction, etc.) use the
+# router's primary_model while player-facing narration uses orchestrator_model.
+# Aurora World can point the local OpenAI-compatible primary path at a small
+# structured worker without changing the stable `gpt-5.6-sol` narrator alias.
 _AUXILIARY_MODELS = {
     LLMProvider.ANTHROPIC: "claude-sonnet-5",
     LLMProvider.DEEPSEEK: "deepseek-v4-flash",
@@ -62,11 +64,19 @@ _AUXILIARY_MODELS = {
 }
 
 
+def _resolve_auxiliary_model(provider: LLMProvider, narrative_model: str) -> str:
+    if provider == LLMProvider.OPENAI:
+        local_aux = os.environ.get("LUNAR_AUX_MODEL", "").strip()
+        if local_aux:
+            return local_aux
+    return _AUXILIARY_MODELS.get(provider, narrative_model)
+
+
 def apply_model_policy(provider: LLMProvider, model: str) -> None:
-    """Narrative runs on `model`; everything else on the provider's auxiliary model."""
+    """Keep narration on `model`; route mechanical calls through the auxiliary path."""
     narrative_model = _OPENAI_MODEL if provider == LLMProvider.OPENAI else model
     _llm.config.primary_provider = provider
-    _llm.config.primary_model = _AUXILIARY_MODELS.get(provider, narrative_model)
+    _llm.config.primary_model = _resolve_auxiliary_model(provider, narrative_model)
     _llm.config.orchestrator_model = narrative_model
 
 

@@ -845,15 +845,48 @@ class GameSession:
         # 3. Fall back to LLM estimate
         return max(1, min(10, llm_estimate))
 
-    async def _evaluate_power_update(self, narrative: str, player_input: str) -> dict | None:
-        """Ask the LLM if the player's power level should change based on what just happened.
+    @staticmethod
+    def _has_power_change_signal(narrative: str, player_input: str) -> bool:
+        """High-recall prefilter for events that could change core capabilities.
 
-        Embedded as a lightweight check — only updates when narratively significant.
-        Returns the power change dict if updated, None otherwise.
+        Ordinary exploration, dialogue, and combat are intentionally rejected
+        here; the LLM evaluator is only worth running when the prose/action
+        contains evidence of a durable capability gain/loss/transformation.
         """
+        import re
+
+        text = f"{player_input}\n{narrative}".lower()
+        direct_signals = (
+            "power level", "new ability", "new abilities", "lost ability",
+            "loses the ability", "can now", "can no longer", "permanent transformation",
+            "permanently transformed", "mutation", "awakening", "awakened power",
+            "blessing grants", "curse grants", "curse removes", "artifact grants",
+            "nível de poder", "nova habilidade", "novas habilidades", "perdeu a habilidade",
+            "pode agora", "não pode mais", "transformação permanente", "mutação",
+            "despertar", "poder despertado", "bênção concede", "maldição remove",
+            "artefato concede",
+        )
+        if any(signal in text for signal in direct_signals):
+            return True
+
+        capability = r"(?:power|ability|abilities|skill|technique|spell|magic|strength|speed|durability|poder|habilidade|habilidades|técnica|magia|força|velocidade|resistência)"
+        change = r"(?:gain(?:ed|s)?|los(?:e|es|t)|unlock(?:ed|s)?|awaken(?:ed|s)?|learn(?:ed|s)?|master(?:ed|s)?|acquir(?:e|ed|es)|grant(?:ed|s)?|drain(?:ed|s)?|seal(?:ed|s)?|ganh(?:a|ou)|perd(?:e|eu)|desbloque(?:ia|ou)|aprend(?:e|eu)|domin(?:a|ou)|adquir(?:e|iu)|conced(?:e|eu)|dren(?:a|ou)|sel(?:a|ou))"
+        return bool(
+            re.search(rf"\b{change}\b.{{0,48}}\b{capability}\b", text, re.IGNORECASE)
+            or re.search(rf"\b{capability}\b.{{0,48}}\b{change}\b", text, re.IGNORECASE)
+        )
+
+    async def _evaluate_power_update(self, narrative: str, player_input: str) -> dict | None:
+        """Evaluate a durable power change only when deterministic gates justify it."""
         if not self._combat:
             return None
         power_scale = self._build_power_scale_reference()
+        if not power_scale:
+            logger.debug("Power evaluation skipped: scenario has no calibrated power scale")
+            return None
+        if not self._has_power_change_signal(narrative, player_input):
+            logger.debug("Power evaluation skipped: no capability-change signal")
+            return None
         messages = [
             {
                 "role": "system",
@@ -2180,97 +2213,79 @@ class GameSession:
     # ── Camada 3 — witness extraction (perspective filter) ─────────
 
     async def _extract_witnesses(self, narrative_text: str) -> list[str]:
-        """Run a small LLM call to extract NPCs physically present in the scene.
+        """Derive physically-present NPCs from narrator `@` presence tags.
 
-        Returns the list of NPC names that the model judged to be in the same
-        physical location as the player and able to see / hear what just
-        happened. Excludes the player. Excludes NPCs that are merely
-        remembered, mentioned, or referenced from elsewhere.
-
-        Returns an empty list when the feature flag is off, when the LLM
-        fails, or when the scene has no other characters present.
+        The narrator prompt defines `@` as a machine-readable presence marker,
+        so rediscovering the same state with another LLM call is unnecessary and
+        can hallucinate witnesses. Known short names are canonicalized when the
+        match is unambiguous; genuinely new narrator-created NPC names are kept.
         """
-        if not _perspective_filter_enabled():
-            return []
-        if not narrative_text:
+        if not _perspective_filter_enabled() or not narrative_text:
             return []
 
-        # Anchor the model on canonical names so it doesn't invent new ones
-        # for characters that already exist in the campaign. We pull from
-        # NPC minds (active in this campaign) and NPC story cards.
+        import re
+
         candidates: list[str] = []
-        seen_lower: set[str] = set()
+        seen_candidates: set[str] = set()
         if self._npc_minds:
             for mind in self._npc_minds.get_all_minds(self.campaign_id):
-                key = mind.name.lower()
-                if key not in seen_lower:
-                    seen_lower.add(key)
-                    candidates.append(mind.name)
+                name = (mind.name or "").strip()
+                key = name.lower()
+                if name and key not in seen_candidates:
+                    seen_candidates.add(key)
+                    candidates.append(name)
         for card in self._story_cards:
             ct = getattr(card, "card_type", None)
             ct_val = ct.value if hasattr(ct, "value") else str(ct)
-            if ct_val.upper() == "NPC":
-                key = card.name.lower()
-                if key not in seen_lower:
-                    seen_lower.add(key)
-                    candidates.append(card.name)
+            if ct_val.upper() != "NPC":
+                continue
+            name = (card.name or "").strip()
+            key = name.lower()
+            if name and key not in seen_candidates:
+                seen_candidates.add(key)
+                candidates.append(name)
 
-        candidates_hint = ""
-        if candidates:
-            candidates_hint = (
-                "\n\nKNOWN NPC NAMES (use these EXACT names when any of these "
-                "characters are present — do not invent new spellings): "
-                + ", ".join(candidates[:60])
-            )
+        # Names are emitted as normal prose (`@Elias Carter`, `@María del Sol`).
+        # Keep the grammar intentionally conservative: a capitalized first token,
+        # up to three additional capitalized/particle name components, then stop
+        # before ordinary lower-case prose.
+        name_pattern = re.compile(
+            r"@([A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’\-]*"
+            r"(?:\s+(?:(?:de|da|do|dos|das|del|la|le|van|von)\s+)?"
+            r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’\-]*){0,3})"
+        )
 
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You analyze a single RPG scene and identify which NPCs are "
-                    "PHYSICALLY PRESENT in the scene with the player. "
-                    "An NPC is 'physically present' only if they are in the same "
-                    "location as the player and could plausibly see or hear the "
-                    "events being narrated. "
-                    "EXCLUDE: the player; NPCs only mentioned in dialogue, "
-                    "memories, flashbacks, or third-party reports; NPCs in another "
-                    "place; abstract entities (factions, deities, generic crowds). "
-                    "Return ONLY valid JSON (no markdown): "
-                    '{"npcs_present": ["FullName1", "FullName2"]}. '
-                    "Use full canonical names when available. If nobody is "
-                    "present besides the player, return an empty list."
-                    + candidates_hint
-                ),
-            },
-            {"role": "user", "content": narrative_text},
-        ]
-        try:
-            raw = await self._narrator._llm.complete(messages=messages, max_tokens=256, reasoning=False)
-            data = parse_json_dict(raw) or {}
-            names = data.get("npcs_present", [])
-            if not isinstance(names, list):
-                return []
-            cleaned: list[str] = []
-            seen: set[str] = set()
-            for n in names:
-                if not isinstance(n, str):
-                    continue
-                name = n.strip().lstrip("@").strip()
-                if not name:
-                    continue
-                key = name.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                cleaned.append(name)
-            logger.info(
-                "Witness extraction for campaign %s — npcs_present=%s",
-                self.campaign_id, cleaned,
-            )
-            return cleaned
-        except Exception:
-            logger.warning("Witness extraction failed", exc_info=True)
-            return []
+        extracted: list[str] = []
+        seen: set[str] = set()
+        for match in name_pattern.finditer(narrative_text):
+            name = match.group(1).strip()
+            name = re.sub(r"(?:'s|’s)$", "", name).strip()
+            if not name or name.lower() == "player":
+                continue
+
+            key = name.lower()
+            exact = next((c for c in candidates if c.lower() == key), None)
+            canonical = exact
+            if canonical is None:
+                short_matches = [
+                    c for c in candidates
+                    if c.lower().startswith(key + " ")
+                    or c.lower().endswith(" " + key)
+                ]
+                if len(short_matches) == 1:
+                    canonical = short_matches[0]
+            final_name = canonical or name
+            final_key = final_name.lower()
+            if final_key in seen:
+                continue
+            seen.add(final_key)
+            extracted.append(final_name)
+
+        logger.info(
+            "Deterministic witness extraction for campaign %s — npcs_present=%s",
+            self.campaign_id, extracted,
+        )
+        return extracted
 
     def _apply_witnesses_to_recent_turn(
         self,

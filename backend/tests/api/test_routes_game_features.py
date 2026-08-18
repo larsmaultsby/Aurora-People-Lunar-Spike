@@ -57,6 +57,28 @@ def test_request_defaults_use_local_sol_route():
     assert settings.model == "gpt-5.6-sol"
 
 
+def test_openai_auxiliary_model_can_be_overridden_for_local_worker(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.setenv("LUNAR_AUX_MODEL", "small-structured-worker")
+    routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+    try:
+        assert routes_game._llm.config.orchestrator_model == "gpt-5.6-sol"
+        assert routes_game._llm.config.primary_model == "small-structured-worker"
+    finally:
+        monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
+        routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+
+
+def test_openai_auxiliary_model_defaults_to_sol_when_unset(monkeypatch):
+    from app.api import routes_game
+
+    monkeypatch.delenv("LUNAR_AUX_MODEL", raising=False)
+    routes_game.apply_model_policy(routes_game.LLMProvider.OPENAI, "gpt-5.6-sol")
+    assert routes_game._llm.config.orchestrator_model == "gpt-5.6-sol"
+    assert routes_game._llm.config.primary_model == "gpt-5.6-sol"
+
+
 def test_get_settings(client):
     r = client.get("/api/settings")
     assert r.status_code == 200

@@ -220,8 +220,12 @@ def test_narrator_prompt_uses_generic_character_tag_format_without_sample_names(
         language="pt-br",
     )
 
-    assert "literal @ character" in prompt_en
-    assert "caractere literal @" in prompt_pt
+    assert "PRESENCE TAG PROTOCOL" in prompt_en
+    assert "physically present" in prompt_en
+    assert "only remembered, quoted, discussed, reported, or located elsewhere" in prompt_en
+    assert "PROTOCOLO DE PRESENÇA" in prompt_pt
+    assert "fisicamente presente" in prompt_pt
+    assert "apenas lembrados, citados, discutidos, relatados ou localizados em outro lugar" in prompt_pt
     for contaminated_name in ("Satoru Gojo", "Yuji", "Kael Noir"):
         assert contaminated_name not in prompt_en
         assert contaminated_name not in prompt_pt

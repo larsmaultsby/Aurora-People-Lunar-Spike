@@ -134,6 +134,95 @@ async def test_narrative_action_triggers_world_tick(session, mock_world_reactor)
 
 
 @pytest.mark.asyncio
+async def test_witness_extraction_uses_presence_tags_without_llm(session, monkeypatch):
+    monkeypatch.setenv("LUNAR_FEATURE_PERSPECTIVE_FILTER", "1")
+    session._story_cards = [
+        SimpleNamespace(
+            card_type=SimpleNamespace(value="NPC"),
+            name="Elias Carter",
+            content={},
+        )
+    ]
+    session._narrator._llm.complete = AsyncMock(return_value='{"npcs_present":["WRONG"]}')
+
+    witnesses = await session._extract_witnesses(
+        "@Elias watches the window. Mara Vale is mentioned but remains elsewhere. "
+        "@Iris Blackwood’s hand tightens around the lantern. @Elias answers quietly."
+    )
+
+    assert witnesses == ["Elias Carter", "Iris Blackwood"]
+    session._narrator._llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_witness_extraction_keeps_new_narrator_created_npc(session, monkeypatch):
+    monkeypatch.setenv("LUNAR_FEATURE_PERSPECTIVE_FILTER", "1")
+    witnesses = await session._extract_witnesses("@Eleanor Voss steps into the aisle.")
+    assert witnesses == ["Eleanor Voss"]
+
+
+@pytest.mark.asyncio
+async def test_witness_extraction_respects_feature_flag(session, monkeypatch):
+    monkeypatch.setenv("LUNAR_FEATURE_PERSPECTIVE_FILTER", "0")
+    assert await session._extract_witnesses("@Eleanor Voss waits nearby.") == []
+
+
+@pytest.mark.asyncio
+async def test_power_evaluation_skips_when_scenario_has_no_power_scale(session):
+    session._combat._llm.complete = AsyncMock(return_value='{"should_update": true, "new_power": 4}')
+
+    result = await session._evaluate_power_update(
+        "A strange light changes you forever.",
+        "I touch the strange light.",
+    )
+
+    assert result is None
+    session._combat._llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_power_evaluation_skips_ordinary_turn_with_power_scale(session):
+    session._story_cards = [
+        SimpleNamespace(
+            card_type=SimpleNamespace(value="NPC"),
+            name="Veteran Guard",
+            content={"power_level": 5},
+        )
+    ]
+    session._combat._llm.complete = AsyncMock(return_value='{"should_update": false, "new_power": 3}')
+
+    result = await session._evaluate_power_update(
+        "You cross the platform and ask the conductor about the delay.",
+        "I ask what happened.",
+    )
+
+    assert result is None
+    session._combat._llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_power_evaluation_runs_for_explicit_capability_change(session):
+    session._story_cards = [
+        SimpleNamespace(
+            card_type=SimpleNamespace(value="NPC"),
+            name="Veteran Guard",
+            content={"power_level": 5},
+        )
+    ]
+    session._combat._llm.complete = AsyncMock(
+        return_value='{"should_update": false, "new_power": 3, "reason": "not enough yet"}'
+    )
+
+    result = await session._evaluate_power_update(
+        "The relic grants you a new ability to see through solid walls.",
+        "I accept the relic's gift.",
+    )
+
+    assert result is None
+    session._combat._llm.complete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_foreground_waiter_preempts_next_maintenance_stage(session):
     first_stage_started = asyncio.Event()
     release_first_stage = asyncio.Event()
