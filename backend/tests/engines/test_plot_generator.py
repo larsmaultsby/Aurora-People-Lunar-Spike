@@ -35,6 +35,7 @@ async def test_generate_npc_returns_valid_npc(generator, mock_llm):
     assert npc.power_level == 7
     assert npc.secret is not None
     assert 1 <= npc.power_level <= 10
+    assert mock_llm.complete.call_args.kwargs["orchestrator"] is True
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,7 @@ async def test_generate_random_event(generator, mock_llm):
     )
     assert event.title == "The Wandering Merchant"
     assert len(event.choices) == 3
+    assert mock_llm.complete.call_args.kwargs["orchestrator"] is True
 
 
 @pytest.mark.asyncio
@@ -96,6 +98,7 @@ async def test_generate_plot_arc_returns_string(generator, mock_llm):
     prompt = mock_llm.complete.call_args.kwargs["messages"][0]["content"]
     assert "direct, visible development" in prompt
     assert "Prefer open goals and conflicts" in prompt
+    assert mock_llm.complete.call_args.kwargs["orchestrator"] is True
 
 
 @pytest.mark.asyncio
@@ -140,6 +143,7 @@ async def test_generate_micro_hook_does_not_default_to_hidden_plot(generator, mo
     prompt = mock_llm.complete.call_args.kwargs["messages"][0]["content"]
     assert "must not create a new mystery" in prompt
     assert "return NONE" in prompt
+    assert mock_llm.complete.call_args.kwargs["orchestrator"] is True
 
 
 def test_default_auto_plot_rules_leave_room_between_injections():

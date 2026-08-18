@@ -7,8 +7,10 @@ from app.engines.npc_mind_engine import NpcMindEngine, NpcMind
 class FakeLLM:
     def __init__(self, response: str = ""):
         self._response = response
+        self.calls = []
 
     async def complete(self, messages, **kwargs):
+        self.calls.append({"messages": messages, **kwargs})
         return self._response
 
 
@@ -37,6 +39,15 @@ async def test_update_npc_thoughts_parses_json():
     assert updated[0].name == "Eldric"
     assert updated[0].get_thought("feeling") == "Suspicious of the newcomer"
     assert updated[0].get_thought("secret_plan") == "Has hidden the artifact"
+    assert engine._llm.calls[0]["orchestrator"] is True
+
+
+@pytest.mark.asyncio
+async def test_name_equivalence_check_stays_on_auxiliary_path():
+    llm = FakeLLM("YES")
+    engine = NpcMindEngine(llm=llm)
+    assert await engine._confirm_same_character("Elias", "Elias Carter") is True
+    assert not llm.calls[0].get("orchestrator", False)
 
 
 @pytest.mark.asyncio

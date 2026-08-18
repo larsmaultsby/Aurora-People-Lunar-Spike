@@ -325,7 +325,10 @@ class AuditorEngine:
             # answer itself, and free reasoning drains the whole budget before any
             # text is written, which returns empty and silently skips the audit.
             raw = await self._llm.complete(
-                messages=messages, max_tokens=api_max_tokens, reasoning=False
+                messages=messages,
+                max_tokens=api_max_tokens,
+                reasoning=False,
+                orchestrator=True,
             )
         except Exception:
             logger.error("Auditor LLM call failed; releasing original prose", exc_info=True)

@@ -59,3 +59,4 @@ async def test_minor_tick_returns_world_changes(reactor, mock_llm):
     prompt = mock_llm.complete.call_args.kwargs["messages"][0]["content"]
     assert "Prefer direct, observable changes" in prompt
     assert "Do not create a new mystery" in prompt
+    assert mock_llm.complete.call_args.kwargs["orchestrator"] is True

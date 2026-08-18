@@ -14,10 +14,12 @@ class _FakeLLM:
         self._raises = raises
         self.last_messages = None
         self.last_max_tokens = None
+        self.last_kwargs = {}
 
     async def complete(self, messages, max_tokens=None, **kwargs):
         self.last_messages = messages
         self.last_max_tokens = max_tokens
+        self.last_kwargs = kwargs
         if self._raises is not None:
             raise self._raises
         return self._reply
@@ -36,6 +38,7 @@ async def test_clean_verdict_returns_original():
     assert out == prose
     assert report["verdict"] == "clean"
     assert report["prose_rewritten"] is False
+    assert llm.last_kwargs["orchestrator"] is True
 
 
 @pytest.mark.asyncio
